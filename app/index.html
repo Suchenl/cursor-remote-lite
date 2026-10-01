@@ -824,7 +824,9 @@ function renderItem(it) {
 
 const nearBottom = () => list.scrollHeight - list.scrollTop - list.clientHeight < 120;
 
+let lastChat = null;
 function renderChat(chat) {
+  lastChat = chat;
   $('empty').hidden = !!chat;
   $('older').hidden = !chat;
   $('pickMode').hidden = !chat?.mode;
@@ -872,6 +874,7 @@ function renderQueue(busy, queued) {
   if (queued.length) {
     html += `<div class="qh">排队中 ${queued.length} 条</div>`;
     html += queued.map(q => `<div class="q"><span class="qt">${esc(q.t || '(空)')}</span>`
+      + `<button data-q="${esc(q.id)}" data-a="edit">修改</button>`
       + `<button data-q="${esc(q.id)}" data-a="send" title="打断当前这一轮，立刻发送">立即发送</button>`
       + `<button data-q="${esc(q.id)}" data-a="remove">删除</button></div>`).join('');
   }
@@ -879,10 +882,27 @@ function renderQueue(busy, queued) {
   bar.classList.toggle('show', Boolean(html));
 }
 
+function editQueued(id) {
+  const q = (lastChat?.queued || []).find(x => x.id === id);
+  if (!q) return status('这条排队消息已经不在了', false);
+  openSheet('queueEdit', `<h3>修改排队消息</h3>
+    <textarea id="qEdit" style="width:100%;box-sizing:border-box;min-height:120px;max-height:50dvh;margin-bottom:10px"></textarea>
+    <button class="opt" id="qSave" style="justify-content:center;background:#0e639c;border-color:#1177bb;color:#fff;font-weight:600">保存（仍在排队）</button>`);
+  $('qEdit').value = q.t;
+  $('qSave').onclick = () => {
+    const v = $('qEdit').value;
+    if (!v.trim()) return status('内容不能为空；不想要这条就点「删除」', false);
+    send({ t: 'queue', id, action: 'edit', text: v });
+    closeSheet();
+    status('正在修改排队消息…');
+  };
+}
+
 $('queueBar').onclick = e => {
   const b = e.target.closest('button');
   if (!b) return;
   if ('stop' in b.dataset) { send({ t: 'stop' }); status('已停止 Agent'); return; }
+  if (b.dataset.a === 'edit') return editQueued(b.dataset.q);
   send({ t: 'queue', id: b.dataset.q, action: b.dataset.a });
   status(b.dataset.a === 'send' ? '已立即发送这条排队消息' : '已删除这条排队消息');
 };

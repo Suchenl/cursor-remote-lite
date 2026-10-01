@@ -255,7 +255,7 @@ function pageHelpers() {
   const queueRows = () => [...document.querySelectorAll(QUEUE_ROW)].filter(vis);
   const queued = () => queueRows().map(e => ({
     id: e.dataset.queueItemId,
-    t: (e.dataset.queueItemQuery || e.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 300),
+    t: (e.dataset.queueItemQuery || e.innerText || '').trim().slice(0, 4000),
   }));
   const isBusy = () => [...document.querySelectorAll('.composer-button-area .codicon-debug-stop, .send-with-mode .codicon-debug-stop')].some(vis);
 
@@ -268,6 +268,15 @@ function pageHelpers() {
     const b = row.querySelector(`[data-queue-action="${CSS.escape(action)}"]`)
       || [...row.querySelectorAll('[aria-label]')].find(e => e.getAttribute('aria-label') === { send: 'Send now', remove: 'Remove', edit: 'Edit' }[action]);
     return b && vis(b) ? center(b) : null;
+  };
+
+  // Editing a queued message loads it into the main composer, which is tagged with the item id until saved.
+  const focusQueueEdit = id => {
+    const bar = [...document.querySelectorAll('[data-editing-queue-item-id]')].find(e => vis(e) && e.dataset.editingQueueItemId === id);
+    const ed = bar && [...bar.querySelectorAll('[contenteditable="true"]')].find(vis);
+    if (!ed) return false;
+    ed.focus();
+    return true;
   };
 
   const stopTarget = () => {
@@ -394,7 +403,7 @@ function pageHelpers() {
     }));
   };
 
-  return { extract, locate, panelRect, control, menuItems, menuItem, quickOpenRows, agentState, queueTarget, stopTarget };
+  return { extract, locate, panelRect, control, menuItems, menuItem, quickOpenRows, agentState, queueTarget, stopTarget, focusQueueEdit };
 }
 
 const helpersCall = call => `(${pageHelpers.toString()})().${call}`;
@@ -465,8 +474,24 @@ class Session {
     setTimeout(() => this.pollChat().catch(() => {}), 300);
   }
 
+  async editQueued(id, text) {
+    if (!text.trim()) throw new Error('内容不能为空；不想要这条就点「删除」');
+    await this.queueAction(id, 'edit');
+    const focus = () => this.cdp.evaluate(helpersCall(`focusQueueEdit(${JSON.stringify(String(id))})`));
+    let ok = false;
+    for (let i = 0; i < 10 && !ok; i++) {
+      await new Promise(r => setTimeout(r, 100));
+      ok = await focus();
+    }
+    if (!ok) throw new Error('Cursor 没有进入编辑状态，没改动');
+    await this.key(process.platform === 'darwin' ? 'Meta+A' : 'Ctrl+A');
+    await this.typeText(text);
+    await this.key('Enter');
+    setTimeout(() => this.pollChat().catch(() => {}), 300);
+  }
+
   async queueAction(id, action) {
-    if (!['send', 'remove'].includes(action)) throw new Error('不支持的排队操作');
+    if (!['send', 'remove', 'edit'].includes(action)) throw new Error('不支持的排队操作');
     const call = a => this.cdp.evaluate(helpersCall(`queueTarget(${JSON.stringify(String(id))}${a ? `, ${JSON.stringify(a)}` : ''})`));
     const row = await call();
     if (!row) throw new Error('这条排队消息已经不在了（可能刚被发出）');
@@ -772,7 +797,7 @@ class Session {
       case 'agentsWindow': return this.openAgentsWindow();
       case 'file': return this.openFile(String(msg.path ?? ''));
       case 'click': return this.clickButton(msg.item, msg.n);
-      case 'queue': return this.queueAction(msg.id, msg.action);
+      case 'queue': return msg.action === 'edit' ? this.editQueued(msg.id, String(msg.text ?? '')) : this.queueAction(msg.id, msg.action);
       case 'stop': return this.stopAgent();
       case 'scrollChat': return this.scrollChat(Number(msg.dy) || 0);
       case 'tap': return this.tap(msg.x, msg.y, msg.button);
@@ -975,6 +1000,7 @@ wss.on('connection', (ws, req) => {
       try {
         const queued = await session.handle(msg);
         if (msg.t === 'type') session.emit({ t: 'status', ok: true, msg: '已发送' });
+        if (msg.t === 'queue' && msg.action === 'edit') session.emit({ t: 'status', ok: true, msg: '已修改，仍在排队' });
         if (msg.t === 'send') session.emit({ t: 'status', ok: true, msg: queued ? 'Agent 正在运行，已加入排队，这一轮结束后自动发送' : '已发送' });
       } catch (e) {
         session.emit({ t: 'status', ok: false, msg: e.message });
