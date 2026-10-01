@@ -1,0 +1,23 @@
+{
+  "name": "cursor-remote-lite",
+  "version": "1.0.0",
+  "description": "Use your desktop Cursor from your phone: chat with the Agent, approve steps, switch windows/modes/models. Free and self-hosted.",
+  "type": "module",
+  "main": "server.mjs",
+  "scripts": {
+    "setup": "node setup.mjs",
+    "start": "node server.mjs",
+    "public": "node server.mjs --tunnel",
+    "set-password": "node set-password.mjs",
+    "reset": "node -e \"require('fs').rmSync(require('os').homedir()+'/.cursor-remote-lite',{recursive:true,force:true});console.log('已重置密码、配置并注销所有已登录设备')\""
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "keywords": ["cursor", "remote", "mobile", "cdp", "agent", "pwa"],
+  "license": "MIT",
+  "dependencies": {
+    "qrcode-terminal": "^0.12.0",
+    "ws": "^8.18.0"
+  }
+}

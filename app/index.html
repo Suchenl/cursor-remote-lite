@@ -1,0 +1,688 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Cursor Remote">
+<meta name="theme-color" content="#1e1e1e">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>Cursor Remote</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: #1e1e1e; color: #d4d4d4; font: 15px/1.55 -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  body { position: fixed; left: 0; top: 0; width: 100%; height: 100dvh; display: flex; flex-direction: column; overflow: hidden;
+         padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  button, select, textarea, input { font: inherit; color: #e6e6e6; background: #2d2d2d; border: 1px solid #3c3c3c; border-radius: 8px; }
+  button { padding: 6px 12px; white-space: nowrap; cursor: pointer; }
+  button:active { filter: brightness(1.3); }
+  button.on, button.primary { background: #0e639c; border-color: #1177bb; color: #fff; }
+  [hidden] { display: none !important; }
+
+  header { flex: none; display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: #252526; border-bottom: 1px solid #333; min-width: 0; }
+  #dot { width: 9px; height: 9px; border-radius: 50%; background: #c33; flex: none; }
+  #dot.ok { background: #3c3; }
+  #title { flex: 1; min-width: 0; display: flex; align-items: center; gap: 4px; background: none; border: none; padding: 4px 2px; text-align: left; color: #ccc; font-size: 14px; }
+  #title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #title::after { content: "▾"; color: #888; flex: none; }
+  .seg { display: flex; flex: none; border: 1px solid #3c3c3c; border-radius: 8px; overflow: hidden; }
+  .seg button { border: none; border-radius: 0; padding: 5px 12px; background: #2d2d2d; }
+  .seg button.on { background: #0e639c; }
+  #menuBtn { flex: none; padding: 5px 10px; }
+
+  main { flex: 1; min-height: 0; position: relative; }
+  .view { position: absolute; inset: 0; display: none; flex-direction: column; min-width: 0; }
+  .view.active { display: flex; }
+
+  /* chat view */
+  #list { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 10px 12px 16px; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+  #older { display: block; margin: 0 auto 10px; font-size: 13px; color: #aaa; background: transparent; }
+  .msg { margin: 8px 0; min-width: 0; overflow-wrap: anywhere; }
+  .human { display: flex; justify-content: flex-end; }
+  .human .bubble { max-width: 88%; background: #264f78; color: #fff; padding: 8px 12px; border-radius: 14px 14px 4px 14px; white-space: pre-wrap; }
+  .assistant { padding: 2px 2px; }
+  .assistant p { margin: 0 0 .6em; }
+  .assistant ul, .assistant ol { margin: 0 0 .6em; padding-left: 1.3em; }
+  .assistant h1, .assistant h2, .assistant h3, .assistant h4 { font-size: 1.05em; margin: .8em 0 .4em; }
+  .assistant code { background: #333; padding: 1px 4px; border-radius: 4px; font: 13px ui-monospace, Menlo, monospace; }
+  .assistant pre { background: #111; padding: 8px 10px; border-radius: 8px; overflow-x: auto; font: 12.5px/1.45 ui-monospace, Menlo, monospace; white-space: pre; }
+  .assistant table { border-collapse: collapse; display: block; overflow-x: auto; font-size: 13px; margin: 0 0 .6em; }
+  .assistant td, .assistant th { border: 1px solid #444; padding: 4px 6px; }
+  .assistant blockquote { margin: 0 0 .6em; padding-left: 10px; border-left: 3px solid #555; color: #aaa; }
+  .tool { font: 12.5px/1.4 ui-monospace, Menlo, monospace; color: #9da5b4; background: #252526; border: 1px solid #303030; border-radius: 8px; padding: 6px 9px; }
+  .tool .txt { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .thinking, .other { font-size: 12px; color: #777; padding-left: 2px; }
+  .btns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .btns button { font-size: 13px; padding: 5px 10px; }
+  .btns button.primary { font-weight: 600; }
+  #empty { color: #888; text-align: center; margin-top: 30vh; padding: 0 20px; }
+  #toBottom { position: absolute; right: 14px; bottom: 12px; border-radius: 20px; padding: 6px 12px; background: #333d; display: none; }
+  #actionBar { flex: none; display: none; gap: 8px; flex-wrap: wrap; padding: 8px 12px; background: #2a2d2e; border-top: 1px solid #333; }
+  #actionBar.show { display: flex; }
+  #actionBar button { flex: 1; padding: 9px; font-weight: 600; }
+
+  /* screen view */
+  .tools { flex: none; display: flex; gap: 6px; padding: 6px 8px; overflow-x: auto; scrollbar-width: none; background: #252526; border-bottom: 1px solid #333; min-width: 0; }
+  .tools::-webkit-scrollbar { display: none; }
+  #view { flex: 1; min-height: 0; overflow: auto; background: #111; -webkit-overflow-scrolling: touch; }
+  #stage { position: relative; overflow: hidden; margin: 0 auto; }
+  #screen { position: absolute; left: 0; top: 0; max-width: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: pan-x pan-y; }
+  #view.scroll #screen { touch-action: none; }
+  #ripple { position: absolute; width: 26px; height: 26px; margin: -13px 0 0 -13px; border-radius: 50%; border: 2px solid #4af; pointer-events: none; opacity: 0; transition: opacity .4s; }
+
+  /* composer */
+  footer { flex: none; background: #252526; border-top: 1px solid #333; padding: 6px 10px 8px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  #chatTools { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; min-width: 0; }
+  #chatTools::-webkit-scrollbar { display: none; }
+  #chatTools button { font-size: 12.5px; padding: 3px 10px; border-radius: 14px; flex: none; white-space: nowrap; }
+  #chatTools #pickModel { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .row { display: flex; gap: 8px; min-width: 0; align-items: flex-end; }
+  textarea { flex: 1; min-width: 0; min-height: 40px; max-height: 32vh; padding: 9px 10px; resize: none; font-size: 16px; line-height: 1.35; }
+  #send { flex: none; height: 40px; padding: 0 16px; background: #0e639c; border-color: #1177bb; color: #fff; font-weight: 600; }
+  #msg { font-size: 12px; color: #888; min-height: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #msg.err { color: #f77; }
+
+  /* bottom sheet */
+  #shade { position: fixed; inset: 0; z-index: 30; background: #0008; display: none; }
+  #shade.open { display: block; }
+  #sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 31; background: #252526; border-radius: 14px 14px 0 0; padding: 12px 12px calc(14px + env(safe-area-inset-bottom)); max-height: 75dvh; overflow-y: auto; transform: translateY(105%); transition: transform .2s; }
+  #sheet.open { transform: none; }
+  #sheet h3 { margin: 2px 4px 10px; font-size: 15px; color: #ccc; font-weight: 600; }
+  .opt { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 11px 12px; margin-bottom: 6px; white-space: normal; }
+  .opt .lbl { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .opt .tag { flex: none; font-size: 11px; padding: 1px 6px; border-radius: 4px; background: #3a3d41; color: #bbb; }
+  .opt.cur { border-color: #1177bb; }
+  .opt.cur::after { content: "✓"; color: #4af; flex: none; }
+  .hint { font-size: 13px; color: #999; margin: 4px 4px 10px; line-height: 1.6; }
+  #sheet img { display: block; width: min(280px, 80vw); margin: 6px auto 10px; border-radius: 10px; }
+
+  /* gate (login / offline) */
+  #gate { position: fixed; inset: 0; z-index: 20; background: #1e1e1e; display: none; flex-direction: column; gap: 12px; padding: calc(60px + env(safe-area-inset-top)) 24px 24px; }
+  #gate.open { display: flex; }
+  #gate h2 { margin: 0 0 6px; font-size: 20px; color: #eee; }
+  #gate input { font-size: 16px; padding: 11px; }
+  #gate button { padding: 11px; }
+  #gateMsg { color: #aaa; line-height: 1.6; }
+  #gateMsg.err { color: #f77; }
+  #gateInfo { font-size: 12px; color: #777; }
+</style>
+</head>
+<body>
+<header>
+  <span id="dot"></span>
+  <button id="title"><span id="titleText">连接中…</span></button>
+  <div class="seg">
+    <button id="tabChat" class="on">对话</button>
+    <button id="tabScreen">画面</button>
+  </div>
+  <button id="menuBtn">⋯</button>
+</header>
+
+<main>
+  <section id="chatView" class="view active">
+    <div id="list">
+      <button id="older">↑ 加载更早的消息</button>
+      <div id="items"></div>
+      <div id="empty" hidden>没找到聊天面板。<br>请在 Cursor 里打开 Agent 对话，或切到「画面」查看。</div>
+    </div>
+    <button id="toBottom">↓ 最新</button>
+    <div id="actionBar"></div>
+  </section>
+
+  <section id="screenView" class="view">
+    <div class="tools">
+      <button id="cropPanel" class="on">聊天面板</button>
+      <button id="cropFull">整个窗口</button>
+      <button id="modeTap" class="on">点击</button>
+      <button id="modeScroll">滚动</button>
+      <button id="zoom">1x</button>
+      <button id="refresh">刷新</button>
+    </div>
+    <div id="view"><div id="stage"><img id="screen" alt=""><div id="ripple"></div></div></div>
+    <div class="tools">
+      <button data-key="Escape">Esc</button>
+      <button data-key="Enter">回车</button>
+      <button data-key="Meta+Enter">⌘回车</button>
+      <button data-key="ArrowUp">↑</button>
+      <button data-key="ArrowDown">↓</button>
+      <button data-key="Tab">Tab</button>
+      <button data-key="Backspace">⌫</button>
+      <button data-key="Meta+l">打开聊天</button>
+      <button id="rightClick">右键</button>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div id="chatTools">
+    <button id="pickMode" hidden></button>
+    <button id="pickModel" hidden></button>
+    <button id="pickHistory">历史</button>
+    <button id="newChat">＋ 新建</button>
+  </div>
+  <div class="row">
+    <textarea id="text" rows="1" placeholder="发给 Cursor Agent…" enterkeyhint="send"></textarea>
+    <button id="send">发送</button>
+  </div>
+  <div id="msg"></div>
+</footer>
+
+<div id="shade"></div>
+<div id="sheet"></div>
+
+<div id="gate">
+  <h2>Cursor Remote</h2>
+  <div id="gateMsg"></div>
+  <input id="pwInput" type="password" placeholder="登录密码" autocomplete="current-password" autocapitalize="off">
+  <button id="pwLogin" class="primary">登录</button>
+  <button id="gateRetry">重试</button>
+  <div id="gateInfo"></div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const PRIMARY = /^(run|allow|accept|approve|keep|continue|build|yes|运行|允许|接受|继续)/i;
+const store = {
+  get: k => localStorage.getItem('cr-' + k),
+  set: (k, v) => v == null ? localStorage.removeItem('cr-' + k) : localStorage.setItem('cr-' + k, v),
+};
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+let base = null, info = null, ws = null, authed = false, failures = 0;
+let mode = store.get('mode') || 'chat';
+let crop = store.get('crop') !== 'full';
+let frame = { w: 1000, h: 800 }, panel = null, zoom = 1, tapMode = 'tap', rightNext = false;
+let windows = [], currentWindow = null;
+
+// Keep the layout above the on-screen keyboard.
+function fitViewport() {
+  const vv = window.visualViewport;
+  if (vv) document.body.style.height = vv.height + 'px';
+}
+window.visualViewport?.addEventListener('resize', fitViewport);
+fitViewport();
+
+function status(text, ok = true) {
+  $('msg').textContent = text;
+  $('msg').className = ok ? '' : 'err';
+}
+
+function send(obj) {
+  if (ws && ws.readyState === 1 && authed) ws.send(JSON.stringify(obj));
+  else status('未连接', false);
+}
+
+/* ---------- gate: login / offline ---------- */
+function gate({ msg = '', err = false, login = false, retry = false } = {}) {
+  $('gate').classList.add('open');
+  $('gateMsg').textContent = msg;
+  $('gateMsg').className = err ? 'err' : '';
+  $('pwInput').hidden = $('pwLogin').hidden = !login;
+  $('gateRetry').hidden = !retry;
+  $('gateInfo').textContent = info?.updated ? '电脑端地址更新于 ' + new Date(info.updated).toLocaleString() : '';
+  if (login) setTimeout(() => $('pwInput').focus(), 50);
+}
+const ungate = () => $('gate').classList.remove('open');
+
+/* ---------- relay discovery & auth ---------- */
+const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+
+// When hosted on GitHub Pages, url.json holds the relay address encrypted with the login password.
+async function decryptUrl(pw) {
+  const raw = await crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveKey']);
+  const key = await crypto.subtle.deriveKey({ name: 'PBKDF2', salt: b64(info.salt), iterations: info.iter, hash: 'SHA-256' },
+    raw, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64(info.iv) }, key, b64(info.data));
+  return JSON.parse(new TextDecoder().decode(plain)).url;
+}
+
+async function resolveBase(pw) {
+  if (info.self) return location.origin;
+  if (!info.data) throw Object.assign(new Error('电脑端还没有发布过地址'), { offline: true });
+  return decryptUrl(pw);
+}
+
+async function api(path, opts = {}) {
+  const headers = { ...(opts.headers || {}), ...(store.get('token') ? { authorization: 'Bearer ' + store.get('token') } : {}) };
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 10000);
+  try {
+    return await fetch(base + path, { ...opts, headers, signal: ctl.signal, cache: 'no-store' });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function login(pw) {
+  const r = await api('/api/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password: pw }) });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.error || '登录失败');
+  store.set('token', body.token);
+}
+
+async function boot() {
+  authed = false;
+  gate({ msg: '正在查找电脑…' });
+  try {
+    info = await fetch('url.json?t=' + Date.now(), { cache: 'no-store' }).then(r => r.json());
+  } catch {
+    return gate({ msg: '读取失败，请检查手机网络', err: true, retry: true });
+  }
+  const pw = store.get('pw');
+  if (!info.self && !pw) return gate({ msg: '首次使用请输入登录密码，密码只保存在这台设备上', login: true });
+  try {
+    base = await resolveBase(pw);
+  } catch (e) {
+    if (e.offline) return gate({ msg: e.message, retry: true });
+    store.set('pw', null);
+    return gate({ msg: '密码不对（或电脑端改过密码），请重新输入', err: true, login: true });
+  }
+  let me;
+  try {
+    me = await api('/api/me').then(r => r.json());
+  } catch {
+    autoRetry();
+    return gate({ msg: '电脑不在线：可能关机、睡眠，或服务刚重启（新地址约 1 分钟后生效）。会自动重试…', retry: true });
+  }
+  if (!me.loggedIn) {
+    if (!pw) return gate({ msg: '请输入登录密码', login: true });
+    try { await login(pw); } catch (e) { return gate({ msg: e.message, err: true, login: true }); }
+  }
+  connect();
+}
+
+let retryTimer = null;
+function autoRetry() {
+  clearTimeout(retryTimer);
+  retryTimer = setTimeout(() => { if (!authed) boot(); }, 15000);
+}
+
+$('pwLogin').onclick = async () => {
+  const pw = $('pwInput').value.trim();
+  if (!pw) return;
+  gate({ msg: '正在登录…' });
+  try {
+    base = await resolveBase(pw);
+  } catch (e) {
+    if (e.offline) return gate({ msg: e.message, retry: true });
+    return gate({ msg: '密码不对', err: true, login: true });
+  }
+  try {
+    await login(pw);
+  } catch (e) {
+    return gate({ msg: e.name === 'AbortError' || e instanceof TypeError ? '电脑不在线，稍后重试' : e.message, err: true, login: true });
+  }
+  if (!info.self) store.set('pw', pw);
+  $('pwInput').value = '';
+  connect();
+};
+$('pwInput').onkeydown = e => { if (e.key === 'Enter') $('pwLogin').click(); };
+$('gateRetry').onclick = boot;
+
+function connect() {
+  clearTimeout(retryTimer);
+  ws = new WebSocket(base.replace(/^http/, 'ws') + '/ws');
+  ws.onopen = () => ws.send(JSON.stringify({ t: 'auth', token: store.get('token') }));
+  let rejected = false;
+  ws.onclose = async () => {
+    $('dot').className = '';
+    if (!authed) {
+      if (rejected) store.set('token', null);
+      await sleep(2000);
+      return boot();
+    }
+    authed = false;
+    failures++;
+    status('断开，重连中…', false);
+    await sleep(Math.min(8000, 800 * failures));
+    // After repeated failures the relay may have restarted on a new address; rediscover it.
+    if (failures >= 3) { failures = 0; return boot(); }
+    connect();
+  };
+  ws.onmessage = ev => {
+    const m = JSON.parse(ev.data);
+    if (m.t === 'auth') {
+      if (!m.ok) { rejected = true; return; }
+      authed = true; failures = 0;
+      ungate();
+      $('dot').className = 'ok';
+      status('已连接');
+      send({ t: 'mode', mode });
+      send({ t: 'windows' });
+      send({ t: 'attach', id: store.get('window') || '' });
+      sentWidth = 0;
+      applyQuality();
+    }
+    else if (m.t === 'chat') renderChat(m.chat);
+    else if (m.t === 'frame') onFrame(m);
+    else if (m.t === 'panel') { panel = m.rect; layoutStage(); applyQuality(); }
+    else if (m.t === 'windows') { windows = m.list; currentWindow = m.current; if (sheetKind === 'windows') showWindows(); }
+    else if (m.t === 'attached') {
+      store.set('window', m.id);
+      currentWindow = m.id;
+      $('titleText').textContent = m.title;
+      send({ t: 'windows' });
+    }
+    else if (m.t === 'menu') showMenu(m.kind, m.items);
+    else if (m.t === 'status') status(m.msg, m.ok);
+  };
+}
+
+/* ---------- bottom sheet ---------- */
+let sheetKind = null;
+function openSheet(kind, html) {
+  sheetKind = kind;
+  $('sheet').innerHTML = html;
+  $('shade').classList.add('open');
+  $('sheet').classList.add('open');
+}
+function closeSheet() {
+  sheetKind = null;
+  $('shade').classList.remove('open');
+  $('sheet').classList.remove('open');
+}
+$('shade').onclick = closeSheet;
+
+const KIND_TAG = { agents: 'Agents', ssh: 'SSH', local: '本地' };
+
+function showWindows() {
+  const rows = windows.map(w => `<button class="opt ${w.id === currentWindow ? 'cur' : ''}" data-win="${esc(w.id)}">
+    <span class="tag">${KIND_TAG[w.kind] || ''}</span><span class="lbl">${esc(w.title || w.id)}</span></button>`).join('');
+  const hasAgents = windows.some(w => w.kind === 'agents');
+  openSheet('windows', `<h3>切换 Cursor 窗口</h3>${rows || '<div class="hint">没有找到窗口</div>'}
+    <button class="opt" data-act="agentsWindow"><span class="lbl">${hasAgents ? '切到 Agents 窗口（Agent 模式）' : '打开 Agents 窗口（Agent 模式）'}</span></button>
+    <div class="hint">「Agents」是 Cursor 专门跑 Agent 的窗口；其他是普通编辑器窗口（IDE 模式），SSH 远程窗口也在这里。</div>`);
+}
+$('title').onclick = () => { send({ t: 'windows' }); showWindows(); };
+
+const MENU_TITLE = { mode: '选择模式', model: '选择模型', history: '历史对话' };
+function showMenu(kind, items) {
+  if (!items.length) return status('菜单是空的，可能 Cursor 版本不同', false);
+  openSheet('menu', `<h3>${MENU_TITLE[kind] || ''}</h3>` + items.map(it =>
+    `<button class="opt ${it.checked ? 'cur' : ''}" data-kind="${kind}" data-label="${esc(it.label)}"><span class="lbl">${esc(it.label)}</span></button>`).join(''));
+}
+
+let installEvent = null;
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvent = e; });
+const standalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+
+let donateAvailable = false;
+fetch('donate-wechat.png', { method: 'HEAD' }).then(r => { donateAvailable = r.ok; }).catch(() => {});
+
+function showMainMenu() {
+  openSheet('main', `<h3>菜单</h3>
+    ${standalone() ? '' : '<button class="opt" data-act="install"><span class="lbl">安装到手机桌面（像 App 一样打开）</span></button>'}
+    <button class="opt" data-act="reconnect"><span class="lbl">重新连接</span></button>
+    ${donateAvailable ? '<button class="opt" data-act="donate"><span class="lbl">赞赏作者 ☕</span></button>' : ''}
+    <button class="opt" data-act="logout"><span class="lbl">退出登录</span></button>`);
+}
+$('menuBtn').onclick = showMainMenu;
+
+function showInstallHelp() {
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  openSheet('install', `<h3>安装到桌面</h3><div class="hint">${ios
+    ? '用 Safari 打开本页 → 点底部「分享」按钮 → 选「添加到主屏幕」。'
+    : '点浏览器右上角（或底部）菜单 → 选「安装应用」或「添加到主屏幕」。<br>安装后从桌面图标打开，就是全屏 App，没有浏览器地址栏。'}</div>`);
+}
+
+$('sheet').addEventListener('click', async e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  if (b.dataset.win) { closeSheet(); return send({ t: 'attach', id: b.dataset.win }); }
+  if (b.dataset.kind) { closeSheet(); status('切换中…'); return send({ t: 'pickMenu', kind: b.dataset.kind, label: b.dataset.label }); }
+  const act = b.dataset.act;
+  if (act === 'agentsWindow') { closeSheet(); status('正在打开 Agents 窗口…'); send({ t: 'agentsWindow' }); }
+  else if (act === 'install') {
+    if (installEvent) { closeSheet(); installEvent.prompt(); installEvent = null; }
+    else showInstallHelp();
+  }
+  else if (act === 'reconnect') { closeSheet(); ws?.close(); }
+  else if (act === 'donate') {
+    openSheet('donate', `<h3>赞赏作者</h3><div class="hint">觉得好用的话，可以请作者喝杯咖啡（微信扫码）。完全自愿，感谢支持！</div><img src="donate-wechat.png" alt="微信赞赏码">`);
+  }
+  else if (act === 'logout') {
+    closeSheet();
+    await api('/api/logout', { method: 'POST' }).catch(() => {});
+    store.set('token', null); store.set('pw', null);
+    authed = false; ws?.close();
+  }
+});
+
+/* ---------- mode switching ---------- */
+function setMode(m) {
+  mode = m;
+  store.set('mode', m);
+  $('tabChat').classList.toggle('on', m === 'chat');
+  $('tabScreen').classList.toggle('on', m === 'screen');
+  $('chatView').classList.toggle('active', m === 'chat');
+  $('screenView').classList.toggle('active', m === 'screen');
+  $('chatTools').hidden = m !== 'chat';
+  if (authed) send({ t: 'mode', mode: m });
+  if (m === 'screen') { layoutStage(); applyQuality(); }
+}
+$('tabChat').onclick = () => setMode('chat');
+$('tabScreen').onclick = () => setMode('screen');
+
+/* ---------- chat view ---------- */
+const list = $('list'), itemsEl = $('items');
+const cache = new Map();
+
+function buttonsHtml(labels, item) {
+  return labels.map((l, n) =>
+    `<button class="${PRIMARY.test(l) ? 'primary' : ''}" data-item="${esc(item)}" data-n="${n}">${esc(l)}</button>`).join('');
+}
+
+function renderItem(it) {
+  const el = document.createElement('div');
+  el.className = 'msg ' + it.k;
+  if (it.k === 'human') el.innerHTML = `<div class="bubble">${esc(it.t || '')}</div>`;
+  // it.h comes from the whitelist sanitizer in server.mjs (pageHelpers.clean): plain tags only, text escaped.
+  else if (it.k === 'assistant') el.innerHTML = it.h || '';
+  else if (it.k === 'tool') el.innerHTML = `<div class="txt">${esc(it.t || '')}</div>`;
+  else el.textContent = it.t || '';
+  if (it.b && it.k !== 'human') el.insertAdjacentHTML('beforeend', `<div class="btns">${buttonsHtml(it.b, it.i)}</div>`);
+  return el;
+}
+
+const nearBottom = () => list.scrollHeight - list.scrollTop - list.clientHeight < 120;
+
+function renderChat(chat) {
+  $('empty').hidden = !!chat;
+  $('older').hidden = !chat;
+  $('pickMode').hidden = !chat?.mode;
+  $('pickModel').hidden = !chat?.model;
+  if (chat?.mode) $('pickMode').textContent = chat.mode + ' ▾';
+  if (chat?.model) $('pickModel').textContent = chat.model + ' ▾';
+  if (!chat) { itemsEl.replaceChildren(); return; }
+  const stick = nearBottom();
+  // Anchor on the first visible item so loading older messages doesn't jump.
+  let anchor = null, anchorTop = 0;
+  if (!stick) {
+    for (const el of itemsEl.children) {
+      if (el.offsetTop + el.offsetHeight > list.scrollTop) { anchor = el.dataset.i; anchorTop = el.offsetTop - list.scrollTop; break; }
+    }
+  }
+  const els = chat.items.map(it => {
+    const key = JSON.stringify(it);
+    const hit = cache.get(it.i);
+    if (hit && hit.key === key) return hit.el;
+    const el = renderItem(it);
+    el.dataset.i = it.i;
+    cache.set(it.i, { key, el });
+    return el;
+  });
+  itemsEl.replaceChildren(...els);
+  const live = new Set(chat.items.map(it => it.i));
+  for (const k of cache.keys()) if (!live.has(k)) cache.delete(k);
+
+  $('actionBar').innerHTML = buttonsHtml(chat.global, 'g');
+  $('actionBar').classList.toggle('show', chat.global.length > 0);
+
+  if (stick) list.scrollTop = list.scrollHeight;
+  else if (anchor) {
+    const el = [...itemsEl.children].find(e => e.dataset.i === anchor);
+    if (el) list.scrollTop = el.offsetTop - anchorTop;
+  }
+  updateToBottom();
+}
+
+function updateToBottom() {
+  $('toBottom').style.display = nearBottom() ? 'none' : 'block';
+}
+list.addEventListener('scroll', updateToBottom);
+$('toBottom').onclick = () => { list.scrollTop = list.scrollHeight; };
+$('older').onclick = () => send({ t: 'scrollChat', dy: -900 });
+
+document.addEventListener('click', e => {
+  const b = e.target.closest('button[data-item]');
+  if (!b) return;
+  send({ t: 'click', item: b.dataset.item, n: Number(b.dataset.n) });
+  status('已点击：' + b.textContent);
+});
+
+$('pickMode').onclick = () => { status('读取模式列表…'); send({ t: 'openMenu', kind: 'mode' }); };
+$('pickModel').onclick = () => { status('读取模型列表…'); send({ t: 'openMenu', kind: 'model' }); };
+$('pickHistory').onclick = () => { status('读取历史对话…'); send({ t: 'openMenu', kind: 'history' }); };
+$('newChat').onclick = () => { send({ t: 'newChat' }); status('已新建对话'); };
+
+/* ---------- screen view ---------- */
+const view = $('view'), stage = $('stage'), screen = $('screen');
+
+function onFrame(m) {
+  const resized = m.w !== frame.w || m.h !== frame.h;
+  frame = { w: m.w, h: m.h };
+  screen.src = 'data:image/jpeg;base64,' + m.data;
+  layoutStage();
+  if (resized) applyQuality();
+}
+screen.onload = () => send({ t: 'ack' });
+
+const cropRect = () => crop && panel ? panel : [0, 0, frame.w, frame.h];
+
+function layoutStage() {
+  if (mode !== 'screen') return;
+  const [rx, ry, rw, rh] = cropRect();
+  const stageW = view.clientWidth * zoom;
+  const scale = stageW / rw;
+  stage.style.width = stageW + 'px';
+  stage.style.height = rh * scale + 'px';
+  screen.style.width = frame.w * scale + 'px';
+  screen.style.left = -rx * scale + 'px';
+  screen.style.top = -ry * scale + 'px';
+}
+
+let sentWidth = 0;
+function applyQuality() {
+  if (mode !== 'screen' || !authed) return;
+  const [, , rw] = cropRect();
+  const px = Math.min(2560, Math.round(view.clientWidth * zoom * devicePixelRatio * frame.w / rw));
+  if (Math.abs(px - sentWidth) < 40) return;
+  sentWidth = px;
+  send({ t: 'quality', quality: 70, maxWidth: px });
+}
+
+function setCrop(on) {
+  crop = on;
+  store.set('crop', on ? 'panel' : 'full');
+  $('cropPanel').classList.toggle('on', on);
+  $('cropFull').classList.toggle('on', !on);
+  layoutStage(); applyQuality();
+}
+$('cropPanel').onclick = () => setCrop(true);
+$('cropFull').onclick = () => setCrop(false);
+
+function norm(e) {
+  const r = screen.getBoundingClientRect();
+  return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
+}
+
+function ripple(e) {
+  const r = stage.getBoundingClientRect(), el = $('ripple');
+  el.style.left = (e.clientX - r.left) + 'px';
+  el.style.top = (e.clientY - r.top) + 'px';
+  el.style.transition = 'none'; el.style.opacity = 1;
+  requestAnimationFrame(() => { el.style.transition = 'opacity .4s'; el.style.opacity = 0; });
+}
+
+let down = null;
+screen.addEventListener('pointerdown', e => {
+  down = { x: e.clientX, y: e.clientY, t: Date.now(), lastY: e.clientY, lastX: e.clientX, moved: false };
+});
+screen.addEventListener('pointermove', e => {
+  if (!down) return;
+  if (Math.hypot(e.clientX - down.x, e.clientY - down.y) > 10) down.moved = true;
+  if (tapMode === 'scroll' && down.moved) {
+    const scale = frame.w / screen.getBoundingClientRect().width;
+    const dy = (down.lastY - e.clientY) * scale * 1.5, dx = (down.lastX - e.clientX) * scale * 1.5;
+    down.lastY = e.clientY; down.lastX = e.clientX;
+    const p = norm(down);
+    send({ t: 'wheel', x: p.x, y: p.y, dx, dy });
+  }
+});
+screen.addEventListener('pointerup', e => {
+  if (!down) return;
+  const longPress = Date.now() - down.t > 600;
+  if (!down.moved) {
+    const p = norm(e);
+    const button = rightNext || longPress ? 'right' : 'left';
+    rightNext = false; $('rightClick').classList.remove('on');
+    send({ t: 'tap', x: p.x, y: p.y, button });
+    ripple(e);
+  }
+  down = null;
+});
+screen.addEventListener('pointercancel', () => { down = null; });
+screen.addEventListener('contextmenu', e => e.preventDefault());
+
+function setTapMode(m) {
+  tapMode = m;
+  $('modeTap').classList.toggle('on', m === 'tap');
+  $('modeScroll').classList.toggle('on', m === 'scroll');
+  view.classList.toggle('scroll', m === 'scroll');
+}
+$('modeTap').onclick = () => setTapMode('tap');
+$('modeScroll').onclick = () => setTapMode('scroll');
+
+const ZOOMS = [1, 1.5, 2, 3];
+$('zoom').onclick = () => {
+  const cx = (view.scrollLeft + view.clientWidth / 2) / (view.scrollWidth || 1);
+  const cy = (view.scrollTop + view.clientHeight / 2) / (view.scrollHeight || 1);
+  zoom = ZOOMS[(ZOOMS.indexOf(zoom) + 1) % ZOOMS.length];
+  $('zoom').textContent = zoom + 'x';
+  layoutStage();
+  view.scrollLeft = cx * view.scrollWidth - view.clientWidth / 2;
+  view.scrollTop = cy * view.scrollHeight - view.clientHeight / 2;
+  applyQuality();
+};
+$('refresh').onclick = () => send({ t: 'refresh' });
+$('rightClick').onclick = () => { rightNext = !rightNext; $('rightClick').classList.toggle('on', rightNext); };
+document.querySelectorAll('[data-key]').forEach(b => b.onclick = () => send({ t: 'key', key: b.dataset.key }));
+
+/* ---------- composer ---------- */
+const text = $('text');
+function autosize() { text.style.height = 'auto'; text.style.height = text.scrollHeight + 'px'; }
+text.addEventListener('input', autosize);
+$('send').onclick = () => {
+  const v = text.value;
+  if (!v.trim()) return;
+  send({ t: 'send', text: v, submit: true });
+  text.value = ''; autosize();
+  if (mode === 'chat') list.scrollTop = list.scrollHeight;
+};
+
+window.addEventListener('resize', () => { layoutStage(); applyQuality(); });
+if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+
+setCrop(crop);
+setMode(mode);
+boot();
+</script>
+</body>
+</html>
