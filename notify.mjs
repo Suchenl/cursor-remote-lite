@@ -57,10 +57,12 @@ const wanted = () => streams.size > 0 || listDevices().some(d => d.push);
 
 /* ---------- delivery ---------- */
 
+// event.en holds the English title/body for devices whose app is set to English.
 export async function deliver(event, onlyDevice = null) {
-  const payload = JSON.stringify(event);
+  const { en, ...zh } = event;
   for (const d of listDevices()) {
     if (onlyDevice ? d.id !== onlyDevice : watching(d.id, event.win)) continue;
+    const payload = JSON.stringify(d.lang === 'en' && en ? { ...zh, ...en } : zh);
     for (const s of streams) if (s.deviceId === d.id) s.res.write(`data: ${payload}\n\n`);
     if (!d.push) continue;
     try {
@@ -89,13 +91,15 @@ function check(win, w, s) {
   if (s.waiting !== w.waiting) { w.waiting = s.waiting; w.waitPolls = 0; w.told = first; }
   if (s.waiting && !w.told && ++w.waitPolls >= WAIT_POLLS) {
     w.told = true;
-    deliver({ kind: 'waiting', win: win.id, title: `等你确认 · ${name}`, body: s.waitingText || 'Agent 在等你确认' });
+    deliver({ kind: 'waiting', win: win.id, title: `等你确认 · ${name}`, body: s.waitingText || 'Agent 在等你确认',
+      en: { title: `Needs your OK · ${name}`, body: s.waitingText || 'The Agent is waiting for you' } });
   }
 
   if (s.busy) { w.busy = true; w.idle = 0; return; }
   if (!w.busy || ++w.idle < IDLE_POLLS) return;
   w.busy = false;
-  if (!s.waiting) deliver({ kind: 'done', win: win.id, title: `已完成 · ${name}`, body: s.last || 'Agent 已停止' });
+  if (!s.waiting) deliver({ kind: 'done', win: win.id, title: `已完成 · ${name}`, body: s.last || 'Agent 已停止',
+    en: { title: `Done · ${name}`, body: s.last || 'The Agent has stopped' } });
 }
 
 // listWindows/openCdp/probe come from the relay so this module shares its CDP code.

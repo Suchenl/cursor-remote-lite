@@ -270,6 +270,37 @@ function pageHelpers() {
     return b && vis(b) ? center(b) : null;
   };
 
+  // Running subagents: task cards in the transcript plus the "N subagents running" tray above the composer.
+  // Clicking a tray row opens that subagent's own transcript as a chat-editor tab (no composer there).
+  const SUB_ROW = '.composer-toolbar-background-job-item';
+  const subRowName = e => e.querySelector('.composer-toolbar-background-job-item-text')?.innerText.trim() || '';
+  const subagents = () => {
+    const names = new Set();
+    for (const h of document.querySelectorAll('.task-tool-call-header')) {
+      if (!vis(h) || !h.closest('[data-flat-index]')?.querySelector('.ui-subagent-status-indicator--running-loader, .task-subagent-header-pill-button--stop')) continue;
+      const n = h.querySelector('span.truncate')?.childNodes[0]?.textContent.trim();
+      if (n) names.add(n);
+    }
+    for (const r of document.querySelectorAll(SUB_ROW)) if (subRowName(r)) names.add(subRowName(r));
+    return [...names];
+  };
+  const subTrayHeader = () => [...document.querySelectorAll('div')].find(e => vis(e) && [...e.childNodes].some(n => n.nodeType === 3 && /^\d+ subagents? running$/.test(n.textContent.trim())));
+  const subTarget = (name, part) => {
+    const row = [...document.querySelectorAll(SUB_ROW)].find(r => vis(r) && subRowName(r) === name);
+    if (!row) { const h = subTrayHeader(); return h ? { expand: true, ...center(h) } : null; }
+    if (part === 'stop') {
+      const s = [...row.querySelectorAll('span.truncate')].find(e => e.innerText.trim() === 'Stop');
+      return s ? center(s) : null;
+    }
+    return center(row.querySelector('.composer-toolbar-background-job-item-text') || row);
+  };
+  const activeChatTab = () => [...document.querySelectorAll('.tab.active')].map(e => e.getAttribute('aria-label') || '').find(l => /Chat Editors/.test(l)) || null;
+  const tabTarget = label => {
+    const t = [...document.querySelectorAll('.tab')].find(e => vis(e) && e.getAttribute('aria-label') === label);
+    return t ? center(t) : null;
+  };
+  const hasComposer = () => [...document.querySelectorAll('.aislash-editor-input[contenteditable="true"], .ui-prompt-input-editor__input[contenteditable="true"]')].some(vis);
+
   // Editing a queued message loads it into the main composer, which is tagged with the item id until saved.
   const focusQueueEdit = id => {
     const bar = [...document.querySelectorAll('[data-editing-queue-item-id]')].find(e => vis(e) && e.dataset.editingQueueItemId === id);
@@ -310,6 +341,8 @@ function pageHelpers() {
       global,
       busy: isBusy(),
       queued: queued(),
+      subagents: subagents(),
+      readonly: !hasComposer(),
       mode: modeEl ? modeEl.innerText.trim() || modeEl.dataset.mode : null,
       model: modelEl ? modelEl.innerText.trim() : null,
     };
@@ -336,7 +369,7 @@ function pageHelpers() {
 
   const MENU_ITEMS = {
     mode: () => [...document.querySelectorAll('.composer-unified-context-menu-item')].map(e => ({ el: e, label: e.innerText.trim().split('\n')[0], checked: !!e.querySelector('.codicon-check') })),
-    model: () => [...document.querySelectorAll('.ui-menu__row')].filter(e => e.querySelector('.ui-model-picker__item-content-name')).map(e => ({ el: e, label: e.querySelector('.ui-model-picker__item-content-name').innerText.trim(), checked: !!e.querySelector('.codicon-check, .ui-model-picker__item-right-section [class*=check]') })),
+    model: () => [...document.querySelectorAll('.ui-menu__row')].filter(e => e.querySelector('.ui-model-picker__item-content-name')).map(e => ({ el: e, id: e.dataset.testid, params: !!e.querySelector('[data-testid=parameter-edit-btn]'), label: e.querySelector('.ui-model-picker__item-content-name').innerText.trim(), checked: !!e.querySelector('.codicon-check, .ui-model-picker__item-right-section [class*=check]') })),
     history: () => {
       const rows = [...document.querySelectorAll('.composer-history-hover-menu .ui-menu__row')];
       if (rows.length) return rows.map(e => ({ el: e, label: (e.querySelector('.compact-agent-history-react-menu-label, .ui-menu__item-content') || e).innerText.trim().split('\n')[0].slice(0, 80), checked: e.getAttribute('aria-checked') === 'true' || /\b(selected|active|current)\b/.test(e.className) }));
@@ -344,7 +377,39 @@ function pageHelpers() {
     },
   };
 
-  const menuItems = kind => (MENU_ITEMS[kind]?.() || []).filter(x => vis(x.el) && x.label).map(({ label, checked }) => ({ label, checked }));
+  const menuItems = kind => (MENU_ITEMS[kind]?.() || []).filter(x => vis(x.el) && x.label).map(({ el, ...rest }) => rest);
+
+  const menuOpen = () => [...document.querySelectorAll('.ui-menu, .composer-unified-context-menu-item, .composer-history-hover-menu')].some(vis);
+
+  // Model parameters (context size, effort, fast…) live in a per-model submenu behind its "Edit" button.
+  const maxToggle = () => {
+    const t = [...document.querySelectorAll('[data-testid=max-mode-toggle]')].find(vis);
+    return t ? { ...center(t), on: t.getAttribute('aria-checked') === 'true' } : null;
+  };
+  const modelTarget = (id, part) => {
+    const row = [...document.querySelectorAll('[data-testid=model-picker-menu] .ui-menu__row')].find(e => e.dataset.testid === id);
+    if (!row) return null;
+    row.scrollIntoView({ block: 'nearest' });
+    if (part !== 'edit') return center(row);
+    const b = row.querySelector('[data-testid=parameter-edit-btn]');
+    return b && vis(b) ? center(b) : null;
+  };
+  const paramRows = () => {
+    const menu = [...document.querySelectorAll('[data-testid=parameter-submenu]')].find(vis);
+    if (!menu) return null;
+    return [...menu.querySelectorAll('.ui-menu__section')].map(s => ({
+      title: s.querySelector('.ui-menu__section-title')?.innerText.trim() || '',
+      rows: [...s.querySelectorAll('.ui-menu__row, .ui-menu__toggle-row')].filter(vis).map(r => {
+        const toggle = r.matches('.ui-menu__toggle-row');
+        return { el: r, label: (r.querySelector('.ui-menu__item-content') || r).innerText.trim(), toggle, checked: toggle ? r.getAttribute('aria-checked') === 'true' : !!r.querySelector('.ui-model-picker__param-check') };
+      }),
+    }));
+  };
+  const modelParams = () => paramRows()?.map(s => ({ title: s.title, items: s.rows.map(({ el, ...rest }) => rest) })) || null;
+  const paramTarget = (title, label) => {
+    const row = paramRows()?.find(s => s.title === title)?.rows.find(r => r.label === label);
+    return row ? center(row.el) : null;
+  };
 
   const menuItem = (kind, label) => {
     const hit = (MENU_ITEMS[kind]?.() || []).find(x => vis(x.el) && x.label === label);
@@ -403,7 +468,8 @@ function pageHelpers() {
     }));
   };
 
-  return { extract, locate, panelRect, control, menuItems, menuItem, quickOpenRows, agentState, queueTarget, stopTarget, focusQueueEdit };
+  return { extract, locate, panelRect, control, menuItems, menuItem, quickOpenRows, agentState, queueTarget, stopTarget, focusQueueEdit,
+    menuOpen, maxToggle, modelTarget, modelParams, paramTarget, subTarget, activeChatTab, tabTarget, hasComposer };
 }
 
 const helpersCall = call => `(${pageHelpers.toString()})().${call}`;
@@ -506,6 +572,32 @@ class Session {
     setTimeout(() => this.pollChat().catch(() => {}), 300);
   }
 
+  async subagentAction(name, part) {
+    const call = `subTarget(${JSON.stringify(String(name))}, ${JSON.stringify(part)})`;
+    let pos = await this.cdp.evaluate(helpersCall(call));
+    if (pos?.expand) {
+      await this.tapCss(pos.x, pos.y);
+      for (let i = 0; i < 8 && (!pos || pos.expand); i++) {
+        await new Promise(r => setTimeout(r, 120));
+        pos = await this.cdp.evaluate(helpersCall(call));
+      }
+    }
+    if (!pos || pos.expand) throw new Error('这个子 Agent 已经结束了，或者 Cursor 里找不到它');
+    if (part === 'open') {
+      const tab = await this.cdp.evaluate(helpersCall('activeChatTab()'));
+      if (tab && await this.cdp.evaluate(helpersCall('hasComposer()'))) this.mainTab = tab;
+    }
+    await this.tapCss(pos.x, pos.y);
+    setTimeout(() => this.pollChat().catch(() => {}), 500);
+  }
+
+  async backToMain() {
+    const pos = this.mainTab && await this.cdp.evaluate(helpersCall(`tabTarget(${JSON.stringify(this.mainTab)})`));
+    if (!pos) throw new Error('找不到原来的主对话标签页，请在「画面」里手动切回');
+    await this.tapCss(pos.x, pos.y);
+    setTimeout(() => this.pollChat().catch(() => {}), 400);
+  }
+
   async stopAgent() {
     const pos = await this.cdp.evaluate(helpersCall('stopTarget()'));
     if (!pos) throw new Error('Agent 当前没有在运行');
@@ -527,8 +619,72 @@ class Session {
       await new Promise(r => setTimeout(r, 150));
       items = await this.cdp.evaluate(helpersCall(`menuItems(${JSON.stringify(kind)})`));
     }
-    await this.key('Escape');
-    this.emit({ t: 'menu', kind, items });
+    const max = kind === 'model' ? await this.cdp.evaluate(helpersCall('maxToggle()?.on ?? null')) : null;
+    await this.closeMenus();
+    this.emit({ t: 'menu', kind, items, max });
+  }
+
+  async closeMenus() {
+    for (let i = 0; i < 3 && await this.cdp.evaluate(helpersCall('menuOpen()')); i++) {
+      await this.key('Escape');
+      await new Promise(r => setTimeout(r, 120));
+    }
+  }
+
+  async waitFor(call, tries = 10) {
+    for (let i = 0; i < tries; i++) {
+      await new Promise(r => setTimeout(r, 120));
+      const v = await this.cdp.evaluate(helpersCall(call));
+      if (v) return v;
+    }
+    return null;
+  }
+
+  async toggleMax() {
+    await this.pressControl('model');
+    const t = await this.waitFor('maxToggle()');
+    if (!t) { await this.closeMenus(); throw new Error('这个 Cursor 版本没有 MAX Mode 开关'); }
+    await this.tapCss(t.x, t.y);
+    await new Promise(r => setTimeout(r, 250));
+    await this.closeMenus();
+    await this.openMenu('model');
+  }
+
+  // Leaves the parameter submenu open; callers must closeMenus().
+  async openParamMenu(model) {
+    const id = JSON.stringify(String(model));
+    await this.pressControl('model');
+    const row = await this.waitFor(`modelTarget(${id})`);
+    if (!row) { await this.closeMenus(); throw new Error('模型列表里找不到这个模型'); }
+    await this.cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: row.x, y: row.y });
+    const edit = await this.waitFor(`modelTarget(${id}, 'edit')`, 6);
+    if (!edit) { await this.closeMenus(); throw new Error('这个模型没有可调的参数'); }
+    await this.tapCss(edit.x, edit.y);
+    const params = await this.waitFor('modelParams()');
+    if (!params) { await this.closeMenus(); throw new Error('参数菜单没有打开（可能 Cursor 版本不同）'); }
+    return params;
+  }
+
+  async showParams(model, label) {
+    try {
+      this.emit({ t: 'params', model, label, sections: await this.openParamMenu(model) });
+    } finally {
+      await this.closeMenus();
+    }
+  }
+
+  async pickParam(model, label, section, value) {
+    try {
+      await this.openParamMenu(model);
+      const pos = await this.cdp.evaluate(helpersCall(`paramTarget(${JSON.stringify(String(section))}, ${JSON.stringify(String(value))})`));
+      if (!pos) throw new Error(`没找到参数：${section} / ${value}`);
+      await this.tapCss(pos.x, pos.y);
+      await new Promise(r => setTimeout(r, 250));
+    } finally {
+      await this.closeMenus();
+    }
+    await this.showParams(model, label);
+    setTimeout(() => this.pollChat().catch(() => {}), 300);
   }
 
   async pickMenu(kind, label) {
@@ -789,16 +945,22 @@ class Session {
     if (msg.t === 'attach') return this.attach(msg.id);
     if (msg.t === 'mode') return this.setMode(msg.mode);
     if (msg.t === 'visible') { this.visible = Boolean(msg.v); return; }
+    if (msg.t === 'lang') { updateDevice(this.deviceId, { lang: msg.v === 'en' ? 'en' : 'zh' }); return; }
     if (!this.cdp) throw new Error('尚未连接到 Cursor 窗口');
     switch (msg.t) {
       case 'openMenu': return this.openMenu(msg.kind);
       case 'pickMenu': return this.pickMenu(msg.kind, msg.label);
+      case 'toggleMax': return this.toggleMax();
+      case 'params': return this.showParams(String(msg.model ?? ''), String(msg.label ?? ''));
+      case 'pickParam': return this.pickParam(String(msg.model ?? ''), String(msg.label ?? ''), msg.section, msg.value);
       case 'newChat': return this.pressControl('newChat');
       case 'agentsWindow': return this.openAgentsWindow();
       case 'file': return this.openFile(String(msg.path ?? ''));
       case 'click': return this.clickButton(msg.item, msg.n);
       case 'queue': return msg.action === 'edit' ? this.editQueued(msg.id, String(msg.text ?? '')) : this.queueAction(msg.id, msg.action);
       case 'stop': return this.stopAgent();
+      case 'subagent': return this.subagentAction(msg.name, msg.part === 'stop' ? 'stop' : 'open');
+      case 'mainChat': return this.backToMain();
       case 'scrollChat': return this.scrollChat(Number(msg.dy) || 0);
       case 'tap': return this.tap(msg.x, msg.y, msg.button);
       case 'wheel': return this.wheel(msg.x, msg.y, msg.dx || 0, msg.dy || 0);
@@ -942,7 +1104,8 @@ async function handleApi(req, res, route) {
     return json(req, res, 200, { ok: true });
   }
   if (route === '/api/push/test' && req.method === 'POST') {
-    await deliver({ kind: 'test', win: '', title: 'Cursor Remote', body: '测试通知：能看到这条，说明通知已经通了 ✅' }, device.id);
+    await deliver({ kind: 'test', win: '', title: 'Cursor Remote', body: '测试通知：能看到这条，说明通知已经通了 ✅',
+      en: { body: 'Test notification: if you can see this, notifications work ✅' } }, device.id);
     return json(req, res, 200, { ok: true });
   }
   return json(req, res, 404, { error: 'not found' });

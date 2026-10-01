@@ -76,6 +76,8 @@
   #queueBar .q { display: flex; align-items: center; gap: 6px; font-size: 13.5px; }
   #queueBar .q .qt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #ccc; }
   #queueBar .q .qt::before { content: "○ "; color: #777; }
+  #queueBar .q .qt.sa::before { content: "⇢ "; color: #4af; }
+  #queueBar .run.sub { color: #e5c07b; }
   #queueBar button { font-size: 12px; padding: 3px 9px; flex: none; }
 
   /* screen view */
@@ -95,6 +97,8 @@
   #chatTools #pickModel { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .row { display: flex; gap: 8px; min-width: 0; align-items: flex-end; }
   textarea { flex: 1; min-width: 0; min-height: 40px; max-height: 32vh; padding: 9px 10px; resize: none; font-size: 16px; line-height: 1.35; }
+  #mic { flex: none; height: 40px; width: 40px; padding: 0; display: flex; align-items: center; justify-content: center; color: #bbb; }
+  #mic.on { color: #fff; background: #c33; border-color: #e55; animation: pulse 1.2s ease-in-out infinite; }
   #send { flex: none; height: 40px; padding: 0 16px; background: #0e639c; border-color: #1177bb; color: #fff; font-weight: 600; }
   #msg { font-size: 12px; color: #888; min-height: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #msg.err { color: #f77; }
@@ -111,6 +115,17 @@
   .opt .tag { flex: none; font-size: 11px; padding: 1px 6px; border-radius: 4px; background: #3a3d41; color: #bbb; }
   .opt.cur { border-color: #1177bb; }
   .opt.cur::after { content: "✓"; color: #4af; flex: none; }
+  .optRow { display: flex; gap: 6px; align-items: stretch; margin-bottom: 6px; }
+  .optRow .opt { margin-bottom: 0; flex: 1; min-width: 0; }
+  .paramBtn { flex: none; padding: 0 12px; font-size: 13px; }
+  .switch { flex: none; width: 36px; height: 20px; border-radius: 10px; background: #555; position: relative; transition: background .15s; }
+  .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #ddd; transition: left .15s; }
+  .switch.on { background: #0e639c; }
+  .switch.on::after { left: 18px; }
+  .pSec { font-size: 12px; color: #999; margin: 10px 4px 6px; }
+  .pRow { display: flex; flex-wrap: wrap; gap: 6px; }
+  .pRow button { padding: 8px 12px; font-size: 13.5px; }
+  .pRow button.on { border-color: #1177bb; background: #0e639c; color: #fff; }
   .hint { font-size: 13px; color: #999; margin: 4px 4px 10px; line-height: 1.6; }
   .qrs { display: flex; gap: 10px; margin: 4px 0 10px; }
   .qrs figure { flex: 1; min-width: 0; margin: 0; text-align: center; font-size: 13px; color: #aaa; }
@@ -208,6 +223,7 @@
   </div>
   <div class="row">
     <textarea id="text" rows="1" placeholder="发给 Cursor Agent…" enterkeyhint="send"></textarea>
+    <button id="mic" title="语音输入" aria-label="语音输入"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
     <button id="send">发送</button>
   </div>
   <div id="msg"></div>
@@ -235,6 +251,7 @@
   <div id="gateInfo"></div>
 </div>
 
+<script src="i18n.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const PRIMARY = /^(run|allow|accept|approve|keep|continue|build|yes|运行|允许|接受|继续)/i;
@@ -508,6 +525,7 @@ function connect() {
       sentWidth = 0;
       applyQuality();
       send({ t: 'visible', v: document.visibilityState === 'visible' });
+      send({ t: 'lang', v: I18N.lang });
       syncNotify();
       setTimeout(checkAppUpdate, 3000);
     }
@@ -521,7 +539,8 @@ function connect() {
       $('titleText').textContent = winLabel(m.title).name;
       send({ t: 'windows' });
     }
-    else if (m.t === 'menu') showMenu(m.kind, m.items);
+    else if (m.t === 'menu') showMenu(m.kind, m.items, m.max);
+    else if (m.t === 'params') showParams(m);
     else if (m.t === 'file') showFile(m);
     else if (m.t === 'status') status(m.msg, m.ok);
   };
@@ -563,10 +582,22 @@ function showWindows() {
 $('title').onclick = () => { send({ t: 'windows' }); showWindows(); };
 
 const MENU_TITLE = { mode: '选择模式', model: '选择模型', history: '历史对话' };
-function showMenu(kind, items) {
+function showMenu(kind, items, max) {
   if (!items.length) return status('菜单是空的，可能 Cursor 版本不同', false);
-  openSheet('menu', `<h3>${MENU_TITLE[kind] || ''}</h3>` + items.map(it =>
-    `<button class="opt ${it.checked ? 'cur' : ''}" data-kind="${kind}" data-label="${esc(it.label)}"><span class="lbl">${esc(it.label)}</span></button>`).join(''));
+  status('');
+  const maxRow = typeof max === 'boolean'
+    ? `<button class="opt" data-max><span class="lbl">MAX Mode<span class="sub">更大上下文、更贵</span></span><span class="switch ${max ? 'on' : ''}"></span></button>` : '';
+  openSheet('menu', `<h3>${MENU_TITLE[kind] || ''}</h3>` + maxRow + items.map(it => {
+    const pick = `<button class="opt ${it.checked ? 'cur' : ''}" data-kind="${kind}" data-label="${esc(it.label)}"><span class="lbl">${esc(it.label)}</span></button>`;
+    return it.params ? `<div class="optRow">${pick}<button class="paramBtn" data-params="${esc(it.id)}" data-plabel="${esc(it.label)}">参数</button></div>` : pick;
+  }).join(''));
+}
+
+function showParams(m) {
+  status('');
+  openSheet('params', `<h3>${esc(m.label || '模型')} 参数</h3>` + m.sections.map(s => `<div class="pSec">${esc(s.title)}</div><div class="pRow">`
+    + s.items.map(it => `<button class="${it.checked ? 'on' : ''} ${it.toggle ? 'tg' : ''}" data-model="${esc(m.model)}" data-plabel="${esc(m.label)}" data-section="${esc(s.title)}" data-value="${esc(it.label)}">${esc(it.label)}${it.toggle ? (it.checked ? '：开' : '：关') : ''}</button>`).join('')
+    + '</div>').join('') + '<div class="hint">改动会直接应用到电脑上 Cursor 的这个模型。</div>');
 }
 
 let installEvent = null;
@@ -609,6 +640,7 @@ function showMainMenu() {
     ${inApp ? '<button class="opt" data-act="changeUrl"><span class="lbl">更换 App 地址</span></button>'
       : standalone() ? '' : '<button class="opt" data-act="install"><span class="lbl">安装到手机桌面（像 App 一样打开）</span></button>'}
     <button class="opt" data-act="reconnect"><span class="lbl">重新连接</span></button>
+    <button class="opt" data-act="lang"><span class="lbl">语言 / Language</span><span class="tag">${I18N.lang === 'en' ? 'English' : '中文'}</span></button>
     <button class="opt" data-act="devices"><span class="lbl">已配对设备</span></button>
     <button class="opt" data-act="logout"><span class="lbl">取消本机配对</span></button>
     ${donate ? '<button class="opt" data-act="donate"><span class="lbl">赞赏作者 ☕</span></button>' : ''}`);
@@ -747,6 +779,9 @@ $('sheet').addEventListener('click', async e => {
   if (!b) return;
   if (b.dataset.win) { closeSheet(); return send({ t: 'attach', id: b.dataset.win }); }
   if (b.dataset.kind) { closeSheet(); status('切换中…'); return send({ t: 'pickMenu', kind: b.dataset.kind, label: b.dataset.label }); }
+  if ('max' in b.dataset) { status('切换 MAX Mode…'); return send({ t: 'toggleMax' }); }
+  if (b.dataset.params) { status('读取模型参数…'); return send({ t: 'params', model: b.dataset.params, label: b.dataset.plabel }); }
+  if (b.dataset.section) { status('设置中…'); return send({ t: 'pickParam', model: b.dataset.model, label: b.dataset.plabel, section: b.dataset.section, value: b.dataset.value }); }
   const act = b.dataset.act;
   if (act === 'agentsWindow') { closeSheet(); status('正在打开 Agents 窗口…'); send({ t: 'agentsWindow' }); }
   else if (act === 'install') showInstallHelp();
@@ -768,6 +803,10 @@ $('sheet').addEventListener('click', async e => {
   }
   else if (act === 'reconnect') { closeSheet(); ws?.close(); }
   else if (act === 'donate') showDonate();
+  else if (act === 'lang') openSheet('lang', '<h3>语言 / Language</h3>'
+    + `<button class="opt ${I18N.lang === 'zh' ? 'cur' : ''}" data-act="setLang" data-v="zh"><span class="lbl">中文</span></button>`
+    + `<button class="opt ${I18N.lang === 'en' ? 'cur' : ''}" data-act="setLang" data-v="en"><span class="lbl">English</span></button>`);
+  else if (act === 'setLang') I18N.set(b.dataset.v);
   else if (act === 'devices') showDevices();
   else if (b.dataset.remove) {
     if (!confirm(`移除「${b.dataset.name}」？它会立即断开，要重新配对才能再用。`)) return;
@@ -857,7 +896,7 @@ function renderChat(chat) {
 
   $('actionBar').innerHTML = buttonsHtml(chat.global, 'g');
   $('actionBar').classList.toggle('show', chat.global.length > 0);
-  renderQueue(chat.busy, chat.queued || []);
+  renderQueue(chat.busy, chat.queued || [], chat.subagents || [], chat.readonly);
 
   if (stick) list.scrollTop = list.scrollHeight;
   else if (anchor) {
@@ -867,10 +906,16 @@ function renderChat(chat) {
   updateToBottom();
 }
 
-function renderQueue(busy, queued) {
+function renderQueue(busy, queued, subs = [], readonly = false) {
   const bar = $('queueBar');
   let html = '';
-  if (busy) html += `<div class="run"><i></i><span>Agent 正在运行${queued.length ? '，下面的消息会在这一轮结束后依次发送' : '，现在发的消息会先排队'}</span><button data-stop>停止</button></div>`;
+  if (readonly) html += `<div class="run sub"><span>正在查看子 Agent 的对话（只读）</span><button data-main>返回主对话</button></div>`;
+  if (subs.length && !readonly) {
+    html += `<div class="qh">子 Agent 运行中 ${subs.length} 个</div>`;
+    html += subs.map(n => `<div class="q"><span class="qt sa">${esc(n)}</span>`
+      + `<button data-sub="${esc(n)}" data-part="open">查看</button><button data-sub="${esc(n)}" data-part="stop">停止</button></div>`).join('');
+  }
+  if (busy && !readonly) html += `<div class="run"><i></i><span>Agent 正在运行${queued.length ? '，下面的消息会在这一轮结束后依次发送' : '，现在发的消息会先排队'}</span><button data-stop>停止</button></div>`;
   if (queued.length) {
     html += `<div class="qh">排队中 ${queued.length} 条</div>`;
     html += queued.map(q => `<div class="q"><span class="qt">${esc(q.t || '(空)')}</span>`
@@ -902,6 +947,13 @@ $('queueBar').onclick = e => {
   const b = e.target.closest('button');
   if (!b) return;
   if ('stop' in b.dataset) { send({ t: 'stop' }); status('已停止 Agent'); return; }
+  if ('main' in b.dataset) { send({ t: 'mainChat' }); status('返回主对话…'); return; }
+  if (b.dataset.sub) {
+    send({ t: 'subagent', name: b.dataset.sub, part: b.dataset.part });
+    status(b.dataset.part === 'stop' ? '已停止子 Agent' : '正在打开子 Agent…');
+    if (b.dataset.part === 'open') list.scrollTop = list.scrollHeight;
+    return;
+  }
   if (b.dataset.a === 'edit') return editQueued(b.dataset.q);
   send({ t: 'queue', id: b.dataset.q, action: b.dataset.a });
   status(b.dataset.a === 'send' ? '已立即发送这条排队消息' : '已删除这条排队消息');
@@ -1106,6 +1158,42 @@ $('send').onclick = () => {
   send({ t: 'send', text: v, submit: true });
   text.value = ''; autosize();
   if (mode === 'chat') list.scrollTop = list.scrollHeight;
+};
+
+/* ---------- voice input ---------- */
+// Android WebView has no Web Speech API, so the app uses the system recognizer through the bridge instead.
+const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recognizer = null;
+const addVoiceText = s => {
+  text.value += (text.value && !/\s$/.test(text.value) && /^\w/.test(s) ? ' ' : '') + s;
+  autosize();
+};
+window.onVoice = s => { $('mic').classList.remove('on'); s ? (addVoiceText(s), status('')) : status('没听清，再试一次', false); };
+$('mic').onclick = () => {
+  if (window.CursorRemoteApp?.voice) {
+    if (!window.CursorRemoteApp.voice(I18N.speech)) return status('手机上没有语音识别服务，可以用输入法键盘上的麦克风', false);
+    $('mic').classList.add('on');
+    return status('请说话…');
+  }
+  if (inApp) return status('更新安卓 App 后可用语音输入，也可以用输入法键盘上的麦克风', false);
+  if (!Recognition) return status('这个浏览器不支持语音识别，可以用输入法键盘上的麦克风', false);
+  if (recognizer) return recognizer.stop();
+  const before = text.value;
+  recognizer = new Recognition();
+  recognizer.lang = I18N.speech;
+  recognizer.interimResults = true;
+  recognizer.onresult = e => {
+    text.value = before;
+    addVoiceText([...e.results].map(r => r[0].transcript).join(''));
+  };
+  recognizer.onerror = e => status(
+    e.error === 'not-allowed' || e.error === 'service-not-allowed' ? '没有麦克风权限'
+      : e.error === 'network' ? '语音识别连不上服务器（国内网络常见），可以用输入法键盘上的麦克风'
+      : e.error === 'no-speech' ? '没听清，再试一次' : e.error, false);
+  recognizer.onend = () => { recognizer = null; $('mic').classList.remove('on'); };
+  recognizer.start();
+  $('mic').classList.add('on');
+  status('请说话…（再点一下结束）');
 };
 
 window.addEventListener('resize', () => { layoutStage(); applyQuality(); });

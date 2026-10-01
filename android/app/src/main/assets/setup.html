@@ -33,6 +33,19 @@
 </div>
 <script>
 const $ = id => document.getElementById(id);
+const zh = /^zh\b/i.test(navigator.language || '');
+const T = zh ? s => s : s => ({
+  '地址必须是 https': 'The address must use https', '请填写地址': 'Enter an address', '地址格式不对': 'That address is not valid',
+}[s] || s);
+if (!zh) {
+  document.documentElement.lang = 'en';
+  $('offline').innerHTML = '<h2>Can\'t open</h2><p class="err">Cannot reach the app address. Check your phone\'s network.</p>'
+    + '<button id="retry">Retry</button><button id="change" class="ghost">Change app address</button>';
+  $('setup').querySelector('p').innerHTML = 'Run <code>npm run pair</code> on the computer and paste the <b>pairing link</b> here (or just the app address and pair later). Only needed once.';
+  $('url').placeholder = 'Paste pairing link or app address';
+  $('save').textContent = 'Open';
+  $('setup').querySelector('.hint').textContent = 'To change the address later: "⋯ → Change app address" at the top right of the app.';
+}
 const q = new URLSearchParams(location.search);
 const app = window.CursorRemoteApp;
 const current = app ? app.getUrl() : '';
@@ -45,7 +58,7 @@ function normalize(s) {
   if (!s) return '';
   if (!/^https?:\/\//i.test(s)) s = 'https://' + s;
   const u = new URL(s);
-  if (u.protocol !== 'https:') throw new Error('地址必须是 https');
+  if (u.protocol !== 'https:') throw new Error(T('地址必须是 https'));
   if (!u.pathname.endsWith('/')) u.pathname += '/';
   return u.toString();
 }
@@ -53,10 +66,10 @@ function normalize(s) {
 $('save').onclick = () => {
   try {
     const url = normalize($('url').value);
-    if (!url) return ($('msg').textContent = '请填写地址');
+    if (!url) return ($('msg').textContent = T('请填写地址'));
     app.setUrl(url);
   } catch (e) {
-    $('msg').textContent = e.message.includes('https') ? e.message : '地址格式不对';
+    $('msg').textContent = e.message.includes('https') ? e.message : T('地址格式不对');
   }
 };
 $('url').onkeydown = e => { if (e.key === 'Enter') $('save').click(); };

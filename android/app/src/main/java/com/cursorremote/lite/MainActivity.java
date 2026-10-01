@@ -14,6 +14,7 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.os.PowerManager;
 import android.provider.Settings;
+import android.speech.RecognizerIntent;
 import android.widget.Toast;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
@@ -26,12 +27,14 @@ import android.webkit.WebViewClient;
 import org.json.JSONObject;
 
 import java.io.File;
+import java.util.ArrayList;
 
 // A thin WebView shell around the user's GitHub Pages app, so it installs without Google Play services or PWA support.
 public class MainActivity extends Activity {
     private static final String SETUP = "file:///android_asset/setup.html";
     private static final String APK_MIME = "application/vnd.android.package-archive";
     private static final String UPDATE_FILE = "CursorRemote-update.apk";
+    private static final int VOICE = 7;
     private WebView web;
     private SharedPreferences prefs;
 
@@ -114,18 +117,18 @@ public class MainActivity extends Activity {
         File dir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
         if (dir != null) new File(dir, UPDATE_FILE).delete();
         DownloadManager.Request r = new DownloadManager.Request(Uri.parse(url))
-                .setTitle("Cursor Remote 更新")
+                .setTitle(NotifyService.tr("Cursor Remote 更新", "Cursor Remote update"))
                 .setMimeType(APK_MIME)
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
                 .setDestinationInExternalFilesDir(this, Environment.DIRECTORY_DOWNLOADS, UPDATE_FILE);
         prefs.edit().putLong("updateId", dm.enqueue(r)).apply();
-        Toast.makeText(this, "正在下载新版本，下载完会弹出安装界面", Toast.LENGTH_LONG).show();
+        Toast.makeText(this, NotifyService.tr("正在下载新版本，下载完会弹出安装界面", "Downloading the update; the installer opens when done"), Toast.LENGTH_LONG).show();
     }
 
     private void installUpdate(long id) {
         Uri apk = ((DownloadManager) getSystemService(DOWNLOAD_SERVICE)).getUriForDownloadedFile(id);
         if (apk == null) {
-            Toast.makeText(this, "下载失败，请稍后在菜单里重试", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, NotifyService.tr("下载失败，请稍后在菜单里重试", "Download failed; retry from the menu later"), Toast.LENGTH_LONG).show();
             return;
         }
         Intent install = new Intent(Intent.ACTION_VIEW)
@@ -134,7 +137,7 @@ public class MainActivity extends Activity {
         try {
             startActivity(install);
         } catch (Exception e) {
-            Toast.makeText(this, "无法打开安装界面，请到浏览器下载安装", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, NotifyService.tr("无法打开安装界面，请到浏览器下载安装", "Cannot open the installer; download it in a browser"), Toast.LENGTH_LONG).show();
         }
     }
 
@@ -195,6 +198,25 @@ public class MainActivity extends Activity {
         return u.getScheme() != null && u.getScheme().equals(b.getScheme()) && u.getHost() != null && u.getHost().equals(b.getHost());
     }
 
+    private static Intent voiceIntent(String lang) {
+        Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+        if (lang != null && !lang.isEmpty()) i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang);
+        return i;
+    }
+
+    private void voiceResult(String text) {
+        web.evaluateJavascript("window.onVoice && onVoice(" + JSONObject.quote(text) + ")", null);
+    }
+
+    @Override
+    protected void onActivityResult(int request, int result, Intent data) {
+        super.onActivityResult(request, result, data);
+        if (request != VOICE) return;
+        ArrayList<String> heard = result == RESULT_OK && data != null ? data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS) : null;
+        voiceResult(heard == null || heard.isEmpty() ? "" : heard.get(0));
+    }
+
     @Override
     protected void onSaveInstanceState(Bundle out) {
         super.onSaveInstanceState(out);
@@ -251,6 +273,22 @@ public class MainActivity extends Activity {
             String win = prefs.getString("openWin", "");
             prefs.edit().remove("openWin").apply();
             return win;
+        }
+
+        @JavascriptInterface
+        public boolean canVoice() {
+            return voiceIntent("").resolveActivity(getPackageManager()) != null;
+        }
+
+        // The result comes back through onActivityResult as window.onVoice(text).
+        @JavascriptInterface
+        public boolean voice(String lang) {
+            Intent i = voiceIntent(lang);
+            if (i.resolveActivity(getPackageManager()) == null) return false;
+            runOnUiThread(() -> {
+                try { startActivityForResult(i, VOICE); } catch (Exception e) { voiceResult(""); }
+            });
+            return true;
         }
 
         @JavascriptInterface

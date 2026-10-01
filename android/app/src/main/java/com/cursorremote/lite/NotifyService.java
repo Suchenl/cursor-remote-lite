@@ -22,6 +22,7 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 
 import javax.crypto.Cipher;
 import javax.crypto.spec.GCMParameterSpec;
@@ -38,6 +39,11 @@ public class NotifyService extends Service {
     private volatile boolean running;
     private volatile HttpURLConnection conn;
     private Thread worker;
+
+    // Native text follows the phone's language; the web app has its own setting.
+    static String tr(String zh, String en) {
+        return "zh".equals(Locale.getDefault().getLanguage()) ? zh : en;
+    }
 
     static boolean enabled(Context c) {
         return prefs(c).getString(PREF, null) != null;
@@ -58,8 +64,8 @@ public class NotifyService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         createChannels();
         Notification listening = builder(CH_LISTEN)
-                .setContentTitle("Cursor Remote 正在等待 Agent 的消息")
-                .setContentText("Agent 完成或需要你确认时会提醒你")
+                .setContentTitle(tr("Cursor Remote 正在等待 Agent 的消息", "Cursor Remote is listening for the Agent"))
+                .setContentText(tr("Agent 完成或需要你确认时会提醒你", "You'll be alerted when the Agent finishes or needs your OK"))
                 .setContentIntent(openApp(null, 0))
                 .setOngoing(true)
                 .build();
@@ -194,8 +200,8 @@ public class NotifyService extends Service {
     private void createChannels() {
         if (Build.VERSION.SDK_INT < 26) return;
         NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-        nm.createNotificationChannel(new NotificationChannel(CH_EVENTS, "Agent 提醒", NotificationManager.IMPORTANCE_HIGH));
-        NotificationChannel listen = new NotificationChannel(CH_LISTEN, "后台连接", NotificationManager.IMPORTANCE_MIN);
+        nm.createNotificationChannel(new NotificationChannel(CH_EVENTS, tr("Agent 提醒", "Agent alerts"), NotificationManager.IMPORTANCE_HIGH));
+        NotificationChannel listen = new NotificationChannel(CH_LISTEN, tr("后台连接", "Background connection"), NotificationManager.IMPORTANCE_MIN);
         listen.setShowBadge(false);
         nm.createNotificationChannel(listen);
     }
