@@ -601,10 +601,7 @@ function winLabel(title) {
 function showWindows() {
   const rows = windows.map(w => `<button class="opt ${w.id === currentWindow ? 'cur' : ''}" data-win="${esc(w.id)}">
     <span class="tag">${KIND_TAG[w.kind] || ''}</span><span class="lbl">${esc(winLabel(w.title || w.id).name)}${winLabel(w.title || '').file ? `<span class="sub">${esc(winLabel(w.title).file)}</span>` : ''}</span></button>`).join('');
-  const hasAgents = windows.some(w => w.kind === 'agents');
-  openSheet('windows', `<h3>切换 Cursor 窗口</h3>${rows || '<div class="hint">没有找到窗口</div>'}
-    <button class="opt" data-act="agentsWindow"><span class="lbl">${hasAgents ? '切到 Agents 窗口（Agent 模式）' : '打开 Agents 窗口（Agent 模式）'}</span></button>
-    <div class="hint">「Agents」是 Cursor 专门跑 Agent 的窗口；其他是普通编辑器窗口（IDE 模式），SSH 远程窗口也在这里。</div>`);
+  openSheet('windows', `<h3>切换 Cursor 窗口</h3>${rows || '<div class="hint">没有找到窗口</div>'}`);
 }
 $('title').onclick = () => { send({ t: 'windows' }); showWindows(); };
 
@@ -835,8 +832,7 @@ $('sheet').addEventListener('click', async e => {
   if (b.dataset.params) { status('读取模型参数…'); return send({ t: 'params', model: b.dataset.params, label: b.dataset.plabel }); }
   if (b.dataset.section) { status('设置中…'); return send({ t: 'pickParam', model: b.dataset.model, label: b.dataset.plabel, section: b.dataset.section, value: b.dataset.value }); }
   const act = b.dataset.act;
-  if (act === 'agentsWindow') { closeSheet(); status('正在打开 Agents 窗口…'); send({ t: 'agentsWindow' }); }
-  else if (act === 'install') showInstallHelp();
+  if (act === 'install') showInstallHelp();
   else if (act === 'browserInstall') { closeSheet(); installEvent?.prompt(); installEvent = null; }
   else if (act === 'copyAddress') {
     await navigator.clipboard?.writeText(appAddress()).then(() => status('已复制地址'), () => status('复制失败，请手动记下地址', false));

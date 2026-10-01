@@ -402,7 +402,6 @@ function pageHelpers() {
     model: () => [...document.querySelectorAll('.ui-model-picker__trigger, .composer-unified-dropdown-model')].find(vis),
     history: () => [...document.querySelectorAll('[aria-label^="Show Chat History"], [aria-label^="Show Agent History"]')].find(vis),
     newChat: () => [...document.querySelectorAll('[aria-label^="New Agent"], [aria-label^="New Chat"]')].find(vis),
-    agentsWindow: () => [...document.querySelectorAll('.open-agents-window-button, .titlebar-right .action-label')].find(e => vis(e) && /Agents Window/.test(e.innerText || e.getAttribute('aria-label') || '')),
   };
 
   const center = el => {
@@ -796,20 +795,6 @@ class Session {
     setTimeout(() => this.pollChat().catch(() => {}), 500);
   }
 
-  async openAgentsWindow() {
-    const existing = (await listWindows()).find(w => w.kind === 'agents');
-    if (!existing) {
-      await this.pressControl('agentsWindow');
-      for (let i = 0; i < 20; i++) {
-        await new Promise(r => setTimeout(r, 300));
-        if ((await listWindows()).some(w => w.kind === 'agents')) break;
-      }
-    }
-    const win = (await listWindows()).find(w => w.kind === 'agents');
-    if (!win) throw new Error('Agents 窗口没有打开');
-    await this.attach(win.id);
-  }
-
   async scrollChat(dy) {
     const rect = await this.cdp.evaluate(helpersCall('panelRect()'));
     if (!rect) return;
@@ -1056,7 +1041,6 @@ class Session {
       case 'params': return this.showParams(String(msg.model ?? ''), String(msg.label ?? ''));
       case 'pickParam': return this.pickParam(String(msg.model ?? ''), String(msg.label ?? ''), msg.section, msg.value);
       case 'newChat': return this.pressControl('newChat');
-      case 'agentsWindow': return this.openAgentsWindow();
       case 'file': return this.openFile(String(msg.path ?? ''));
       case 'click': return this.clickButton(msg.item, msg.n);
       case 'queue': return msg.action === 'edit' ? this.editQueued(msg.id, String(msg.text ?? '')) : this.queueAction(msg.id, msg.action);
