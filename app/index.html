@@ -134,7 +134,9 @@
   #gate h2 { margin: 0 0 6px; font-size: 20px; color: #eee; }
   #gate input { font-size: 16px; padding: 11px; }
   #gate button { padding: 11px; }
-  #gateMsg { color: #aaa; line-height: 1.6; }
+  #gateMsg { color: #aaa; line-height: 1.6; white-space: pre-line; }
+  .primary-link { display: block; text-align: center; padding: 11px; border-radius: 8px; background: #0e639c; color: #fff; text-decoration: none; font-weight: 600; }
+  #gateInput.code { font-size: 26px; letter-spacing: 8px; text-align: center; }
   #gateMsg.err { color: #f77; }
   #gateInfo { font-size: 12px; color: #777; }
 </style>
@@ -214,8 +216,9 @@
 <div id="gate">
   <h2>Cursor Remote</h2>
   <div id="gateMsg"></div>
-  <input id="pwInput" type="password" placeholder="登录密码" autocomplete="current-password" autocapitalize="off">
-  <button id="pwLogin" class="primary">登录</button>
+  <input id="gateInput" autocapitalize="off" autocorrect="off" spellcheck="false">
+  <button id="gateBtn" class="primary"></button>
+  <a id="gateApp" class="primary-link" hidden>在 App 中打开</a>
   <button id="gateRetry">重试</button>
   <div id="gateInfo"></div>
 </div>
@@ -254,38 +257,57 @@ function send(obj) {
   else status('未连接', false);
 }
 
-/* ---------- gate: login / offline ---------- */
-function gate({ msg = '', err = false, login = false, retry = false } = {}) {
+/* ---------- gate: pairing / 2FA / offline ---------- */
+let gateSubmit = null;
+function gate({ msg = '', err = false, input = null, retry = false, appLink = null } = {}) {
   $('gate').classList.add('open');
   $('gateMsg').textContent = msg;
   $('gateMsg').className = err ? 'err' : '';
-  $('pwInput').hidden = $('pwLogin').hidden = !login;
+  const inp = $('gateInput');
+  inp.hidden = $('gateBtn').hidden = !input;
+  gateSubmit = input?.submit || null;
+  if (input) {
+    inp.value = '';
+    inp.placeholder = input.placeholder;
+    inp.className = input.code ? 'code' : '';
+    inp.inputMode = input.code ? 'numeric' : 'url';
+    inp.autocomplete = input.code ? 'one-time-code' : 'off';
+    $('gateBtn').textContent = input.button;
+    if (input.code) setTimeout(() => inp.focus(), 50);
+  }
+  $('gateApp').hidden = !appLink;
+  if (appLink) $('gateApp').href = appLink;
   $('gateRetry').hidden = !retry;
+  $('gateRetry').textContent = typeof retry === 'string' ? retry : '重试';
   $('gateInfo').textContent = info?.updated ? '电脑端地址更新于 ' + new Date(info.updated).toLocaleString() : '';
-  if (login) setTimeout(() => $('pwInput').focus(), 50);
 }
 const ungate = () => $('gate').classList.remove('open');
+$('gateBtn').onclick = () => gateSubmit?.($('gateInput').value.trim());
+$('gateInput').onkeydown = e => { if (e.key === 'Enter') $('gateBtn').click(); };
+$('gateRetry').onclick = () => boot();
 
 /* ---------- relay discovery & auth ---------- */
 const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+const b64u = s => b64(s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - s.length % 4) % 4));
 
-// When hosted on GitHub Pages, url.json holds the relay address encrypted with the login password.
-async function decryptUrl(pw) {
-  const raw = await crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveKey']);
-  const key = await crypto.subtle.deriveKey({ name: 'PBKDF2', salt: b64(info.salt), iterations: info.iter, hash: 'SHA-256' },
-    raw, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+// On GitHub Pages, url.json holds the relay address encrypted with a random key that only paired devices hold.
+async function decryptUrl(keyText) {
+  const key = await crypto.subtle.importKey('raw', b64u(keyText), 'AES-GCM', false, ['decrypt']);
   const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64(info.iv) }, key, b64(info.data));
   return JSON.parse(new TextDecoder().decode(plain)).url;
 }
 
-async function resolveBase(pw) {
+const offline = msg => Object.assign(new Error(msg), { offline: true });
+async function resolveBase() {
   if (info.self) return location.origin;
-  if (!info.data) throw Object.assign(new Error('电脑端还没有发布过地址'), { offline: true });
-  return decryptUrl(pw);
+  if (info.v !== 2 || !info.data) throw offline('电脑端还没有发布地址（或还在用旧版本），请在电脑上重启服务');
+  const key = store.get('key');
+  if (!key) throw Object.assign(new Error(''), { unpaired: true });
+  try { return await decryptUrl(key); } catch { throw Object.assign(new Error('配对信息已失效（电脑端重置过），请重新配对'), { unpaired: true, stale: true }); }
 }
 
 async function api(path, opts = {}) {
-  const headers = { ...(opts.headers || {}), ...(store.get('token') ? { authorization: 'Bearer ' + store.get('token') } : {}) };
+  const headers = { 'content-type': 'application/json', ...(store.get('token') ? { authorization: 'Bearer ' + store.get('token') } : {}) };
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 10000);
   try {
@@ -294,31 +316,121 @@ async function api(path, opts = {}) {
     clearTimeout(timer);
   }
 }
+const post = (path, body) => api(path, { method: 'POST', body: JSON.stringify(body || {}) });
 
-async function login(pw) {
-  const r = await api('/api/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password: pw }) });
-  const body = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(body.error || '登录失败');
-  store.set('token', body.token);
+// Pairing links look like <app>#pair=<url key>.<one-time code>.
+function parsePair(text) {
+  const m = /[#&]pair=([\w-]{43})\.([\w-]{16,})/.exec(text || '');
+  return m ? { key: m[1], code: m[2] } : null;
+}
+let pending = parsePair(location.hash);
+if (pending) history.replaceState(null, '', location.pathname + location.search);
+window.addEventListener('hashchange', () => {
+  const p = parsePair(location.hash);
+  if (!p) return;
+  history.replaceState(null, '', location.pathname + location.search);
+  pending = p;
+  boot();
+});
+store.set('pw', null);
+
+function deviceName() {
+  const ua = navigator.userAgent;
+  const model = /Android [\d.]+; (?:[a-z]{2}-[a-z]{2}; )?([^;)]+?)(?: Build|\))/i.exec(ua)?.[1];
+  const kind = inApp ? '安卓 App' : /iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) ? 'iPad' : /Android/.test(ua) ? '安卓浏览器' : /Mac/.test(ua) ? 'Mac 浏览器' : '浏览器';
+  return model && !/^K$/.test(model) ? `${model}（${kind}）` : kind;
+}
+
+function showUnpaired(msg = '') {
+  gate({
+    msg: (msg ? msg + '\n\n' : '') + '这台设备还没有配对。\n在电脑上运行 npm run pair，用手机扫码；或者把链接复制过来粘贴到下面。',
+    err: !!msg,
+    input: { placeholder: '粘贴配对链接', button: '配对', submit: pastePair },
+  });
+}
+
+function pastePair(text) {
+  const p = parsePair(text);
+  if (!p) return showUnpaired('这不是配对链接（应包含 #pair=…）');
+  let target;
+  try { target = new URL(text.trim()); } catch {}
+  const here = location.origin + location.pathname;
+  // A link for another app address: switch to it (the Android app remembers the new address).
+  if (target && /^https?:$/.test(target.protocol) && target.origin + target.pathname !== here) {
+    if (inApp) return window.CursorRemoteApp.setUrl(target.href);
+    location.href = target.href;
+    return;
+  }
+  pending = p;
+  boot();
+}
+
+function showTotp(onCode, err = '') {
+  gate({
+    msg: (err ? err + '\n' : '') + '请输入 Authenticator 里「Cursor Remote」的 6 位验证码',
+    err: !!err,
+    input: { placeholder: '000000', button: '验证', code: true, submit: onCode },
+  });
+}
+
+async function pair(totp) {
+  gate({ msg: '正在配对…' });
+  let r, body;
+  try {
+    r = await post('/api/pair', { code: pending.code, name: deviceName(), totp });
+    body = await r.json().catch(() => ({}));
+  } catch {
+    return gate({ msg: '连不上电脑，配对链接 10 分钟内有效，稍后重试', err: true, retry: true });
+  }
+  if (r.ok) {
+    store.set('token', body.token);
+    pending = null;
+    return connect();
+  }
+  if (body.needTotp) return showTotp(code => pair(code), body.error);
+  pending = null;
+  if (store.get('token')) return gate({ msg: (body.error || '配对失败') + '\n\n这台设备之前已经配对过，可以继续使用。', err: true, retry: '继续使用' });
+  showUnpaired(body.error || '配对失败');
+}
+
+async function verifyTotp(code) {
+  gate({ msg: '正在验证…' });
+  try {
+    const r = await post('/api/totp', { code });
+    const body = await r.json().catch(() => ({}));
+    if (r.ok) return connect();
+    showTotp(verifyTotp, body.error || '验证失败');
+  } catch {
+    gate({ msg: '连不上电脑', err: true, retry: true });
+  }
 }
 
 async function boot() {
   authed = false;
+  clearTimeout(retryTimer);
+  // Android browser opened a pairing link: offer to hand it to the installed app instead.
+  if (pending && /Android/.test(navigator.userAgent) && !inApp && !pending.stay) {
+    const link = `cursorremote://pair?app=${encodeURIComponent(location.origin + location.pathname)}&d=${pending.key}.${pending.code}`;
+    gate({ msg: '已收到配对链接。\n装了安卓 App 就在 App 里打开；否则直接在浏览器里用。', appLink: link, retry: '在浏览器里继续' });
+    pending.stay = true;
+    return;
+  }
   gate({ msg: '正在查找电脑…' });
   try {
     info = await fetch('url.json?t=' + Date.now(), { cache: 'no-store' }).then(r => r.json());
   } catch {
     return gate({ msg: '读取失败，请检查手机网络', err: true, retry: true });
   }
-  const pw = store.get('pw');
-  if (!info.self && !pw) return gate({ msg: '首次使用请输入登录密码，密码只保存在这台设备上', login: true });
+  if (pending) store.set('key', pending.key);
   try {
-    base = await resolveBase(pw);
+    base = await resolveBase();
   } catch (e) {
     if (e.offline) return gate({ msg: e.message, retry: true });
-    store.set('pw', null);
-    return gate({ msg: '密码不对（或电脑端改过密码），请重新输入', err: true, login: true });
+    if (e.stale) { store.set('key', null); store.set('token', null); }
+    return showUnpaired(e.message);
   }
+  if (pending) return pair();
+  if (!store.get('token')) return showUnpaired();
   let me;
   try {
     me = await api('/api/me').then(r => r.json());
@@ -326,10 +438,11 @@ async function boot() {
     autoRetry();
     return gate({ msg: '电脑不在线：可能关机、睡眠，或服务刚重启（新地址约 1 分钟后生效）。会自动重试…', retry: true });
   }
-  if (!me.loggedIn) {
-    if (!pw) return gate({ msg: '请输入登录密码', login: true });
-    try { await login(pw); } catch (e) { return gate({ msg: e.message, err: true, login: true }); }
+  if (!me.paired) {
+    store.set('token', null);
+    return showUnpaired('这台设备已被移除，请重新配对');
   }
+  if (me.needTotp) return showTotp(verifyTotp);
   connect();
 }
 
@@ -339,28 +452,6 @@ function autoRetry() {
   retryTimer = setTimeout(() => { if (!authed) boot(); }, 15000);
 }
 
-$('pwLogin').onclick = async () => {
-  const pw = $('pwInput').value.trim();
-  if (!pw) return;
-  gate({ msg: '正在登录…' });
-  try {
-    base = await resolveBase(pw);
-  } catch (e) {
-    if (e.offline) return gate({ msg: e.message, retry: true });
-    return gate({ msg: '密码不对', err: true, login: true });
-  }
-  try {
-    await login(pw);
-  } catch (e) {
-    return gate({ msg: e.name === 'AbortError' || e instanceof TypeError ? '电脑不在线，稍后重试' : e.message, err: true, login: true });
-  }
-  if (!info.self) store.set('pw', pw);
-  $('pwInput').value = '';
-  connect();
-};
-$('pwInput').onkeydown = e => { if (e.key === 'Enter') $('pwLogin').click(); };
-$('gateRetry').onclick = boot;
-
 function connect() {
   clearTimeout(retryTimer);
   ws = new WebSocket(base.replace(/^http/, 'ws') + '/ws');
@@ -369,8 +460,8 @@ function connect() {
   ws.onclose = async () => {
     $('dot').className = '';
     if (!authed) {
-      if (rejected) store.set('token', null);
-      await sleep(2000);
+      // boot() asks /api/me whether the device was removed or needs 2FA again.
+      await sleep(rejected ? 0 : 2000);
       return boot();
     }
     authed = false;
@@ -460,6 +551,16 @@ const standalone = () => matchMedia('(display-mode: standalone)').matches || nav
 let donate = null;
 fetch('donate.json').then(r => r.ok ? r.json() : null).then(d => { if (d?.qr?.length || d?.links?.length) donate = d; }).catch(() => {});
 
+async function showDevices() {
+  let list = [];
+  try { list = (await api('/api/devices').then(r => r.json())).devices || []; } catch {}
+  const when = t => new Date(t).toLocaleDateString();
+  openSheet('devices', `<h3>已配对设备</h3>` + list.map(d => `
+    <div class="opt ${d.current ? 'cur' : ''}"><span class="lbl">${esc(d.name)}<span class="sub">配对于 ${when(d.created)} · 最近使用 ${when(d.lastSeen)}</span></span>
+    ${d.current ? '' : `<button data-remove="${esc(d.id)}" data-name="${esc(d.name)}">移除</button>`}</div>`).join('')
+    + '<div class="hint">添加新设备：在电脑上运行 npm run pair。<br>开启 Authenticator 二次验证：npm run 2fa。</div>');
+}
+
 function showDonate() {
   const links = (donate.links || []).filter(l => /^https:\/\//.test(l.url));
   openSheet('donate', `<h3>赞赏作者 ☕</h3>
@@ -475,7 +576,8 @@ function showMainMenu() {
       : standalone() ? '' : '<button class="opt" data-act="install"><span class="lbl">安装到手机桌面（像 App 一样打开）</span></button>'}
     <button class="opt" data-act="reconnect"><span class="lbl">重新连接</span></button>
     ${donate ? '<button class="opt" data-act="donate"><span class="lbl">赞赏作者 ☕</span></button>' : ''}
-    <button class="opt" data-act="logout"><span class="lbl">退出登录</span></button>`);
+    <button class="opt" data-act="devices"><span class="lbl">已配对设备</span></button>
+    <button class="opt" data-act="logout"><span class="lbl">取消本机配对</span></button>`);
 }
 $('menuBtn').onclick = showMainMenu;
 
@@ -514,10 +616,17 @@ $('sheet').addEventListener('click', async e => {
   else if (act === 'changeUrl') window.CursorRemoteApp?.changeUrl();
   else if (act === 'reconnect') { closeSheet(); ws?.close(); }
   else if (act === 'donate') showDonate();
+  else if (act === 'devices') showDevices();
+  else if (b.dataset.remove) {
+    if (!confirm(`移除「${b.dataset.name}」？它会立即断开，要重新配对才能再用。`)) return;
+    await post('/api/devices/remove', { id: b.dataset.remove }).catch(() => {});
+    showDevices();
+  }
   else if (act === 'logout') {
+    if (!confirm('取消本机配对？之后要在电脑上重新运行 npm run pair 才能再用。')) return;
     closeSheet();
-    await api('/api/logout', { method: 'POST' }).catch(() => {});
-    store.set('token', null); store.set('pw', null);
+    await post('/api/logout').catch(() => {});
+    store.set('token', null); store.set('key', null);
     authed = false; ws?.close();
   }
 });

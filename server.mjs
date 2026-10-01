@@ -8,18 +8,18 @@ import { spawn } from 'node:child_process';
 import { WebSocketServer } from 'ws';
 import qrcode from 'qrcode-terminal';
 import { workspaces, workspaceForTitle, fileSize, readFile, parseRef } from './files.mjs';
+import {
+  DATA_DIR, encryptUrl, createPairing, pairingValid, consumePairing, listDevices, addDevice, findDevice, updateDevice,
+  removeDevice, totpConfig, verifyTotp, needsTotp, saveState, appBase,
+} from './auth.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 3939);
 const HOST = process.env.HOST || '0.0.0.0';
 const CDP_URL = (process.env.CDP_URL || 'http://127.0.0.1:9222').replace(/\/$/, '');
 const TUNNEL = process.argv.includes('--tunnel');
-const DATA_DIR = path.join(os.homedir(), '.cursor-remote-lite');
-const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
 const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 const APP_DIR = path.join(__dirname, 'app');
-const SESSION_TTL = 30 * 24 * 3600 * 1000;
-const MIN_PASSWORD_LEN = 10;
 
 fs.mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
 
@@ -27,57 +27,14 @@ const CONFIG = loadConfig();
 const PUBLISH_REPO = process.argv.find(a => a.startsWith('--publish='))?.slice('--publish='.length) || process.env.CR_PUBLISH_REPO || CONFIG.publishRepo || '';
 const APP_ORIGIN = PUBLISH_REPO ? `https://${PUBLISH_REPO.split('/')[0].toLowerCase()}.github.io` : '';
 const ALLOWED_ORIGINS = new Set([APP_ORIGIN, ...(process.env.CR_ALLOWED_ORIGINS || '').split(',')].filter(Boolean));
-const PASSWORD = loadPassword();
-const sessions = loadSessions();
 
 function loadConfig() {
   try { return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')); } catch { return {}; }
 }
 
-function loadPassword() {
-  if (process.env.CR_PASSWORD) return process.env.CR_PASSWORD;
-  const file = path.join(DATA_DIR, 'password');
-  try {
-    return fs.readFileSync(file, 'utf8').trim();
-  } catch {
-    const pw = crypto.randomBytes(18).toString('base64url');
-    fs.writeFileSync(file, pw, { mode: 0o600 });
-    return pw;
-  }
-}
-
-function loadSessions() {
-  try {
-    const now = Date.now();
-    return new Map(Object.entries(JSON.parse(fs.readFileSync(SESSIONS_FILE, 'utf8'))).filter(([, exp]) => exp > now));
-  } catch {
-    return new Map();
-  }
-}
-
-function saveSessions() {
-  fs.writeFileSync(SESSIONS_FILE, JSON.stringify(Object.fromEntries(sessions)), { mode: 0o600 });
-}
-
-function safeEqual(a, b) {
-  const x = crypto.createHash('sha256').update(String(a)).digest();
-  const y = crypto.createHash('sha256').update(String(b)).digest();
-  return crypto.timingSafeEqual(x, y);
-}
-
-// Only token hashes are stored on disk.
-const tokenKey = token => crypto.createHash('sha256').update(String(token)).digest('hex');
-
-function issueToken() {
-  const token = crypto.randomBytes(32).toString('base64url');
-  sessions.set(tokenKey(token), Date.now() + SESSION_TTL);
-  saveSessions();
-  return token;
-}
-
-function tokenValid(token) {
-  const exp = token && sessions.get(tokenKey(token));
-  return Boolean(exp && exp > Date.now());
+// A device is usable once paired and, when 2FA asks for it, re-verified.
+function deviceFor(req) {
+  return findDevice(bearer(req));
 }
 
 function bearer(req) {
@@ -108,7 +65,7 @@ function recordFailure(ip) {
   const now = Date.now();
   failures.set(ip, [...(failures.get(ip) || []), now]);
   globalFailures.push(now);
-  console.log(`!! 登录失败 ip=${ip}（15 分钟内：本 IP ${failures.get(ip).length} 次，总计 ${globalFailures.length} 次）`);
+  console.log(`!! 验证失败 ip=${ip}（15 分钟内：本 IP ${failures.get(ip).length} 次，总计 ${globalFailures.length} 次）`);
 }
 
 function readBody(req, limit = 4096) {
@@ -804,6 +761,69 @@ function serveApp(res, name) {
   return true;
 }
 
+async function readJson(req) {
+  try { return JSON.parse(await readBody(req)); } catch { return {}; }
+}
+
+function deviceView(d, current) {
+  return { id: d.id, name: d.name, created: d.created, lastSeen: d.lastSeen, current: d.id === current?.id };
+}
+
+async function handleApi(req, res, route) {
+  const ip = clientIp(req);
+  if (req.method === 'POST' && !originAllowed(req)) return json(req, res, 403, { error: 'bad origin' });
+  const device = deviceFor(req);
+
+  if (route === '/api/me') {
+    return json(req, res, 200, { paired: Boolean(device), needTotp: needsTotp(device), totp: Boolean(totpConfig()) });
+  }
+
+  if (route === '/api/pair' && req.method === 'POST') {
+    if (lockedOut(ip)) return json(req, res, 429, { error: '尝试次数过多，请 15 分钟后再试' });
+    const { code, name, totp } = await readJson(req);
+    if (!pairingValid(code)) {
+      recordFailure(ip);
+      return json(req, res, 401, { error: '配对链接无效或已过期（10 分钟内有效，只能用一次）。请在电脑上重新运行 npm run pair' });
+    }
+    if (totpConfig() && !verifyTotp(totp)) {
+      if (totp) recordFailure(ip);
+      return json(req, res, 401, { needTotp: true, error: totp ? '验证码不对' : '' });
+    }
+    consumePairing();
+    const { device: added, token } = addDevice(name);
+    console.log(`[pair] 新设备「${added.name}」 ip=${ip}`);
+    return json(req, res, 200, { token });
+  }
+
+  if (!device) return json(req, res, 401, { error: '设备未配对' });
+
+  if (route === '/api/totp' && req.method === 'POST') {
+    if (lockedOut(ip)) return json(req, res, 429, { error: '尝试次数过多，请 15 分钟后再试' });
+    const { code } = await readJson(req);
+    if (!verifyTotp(code)) {
+      recordFailure(ip);
+      return json(req, res, 401, { error: '验证码不对' });
+    }
+    updateDevice(device.id, { verifiedAt: Date.now() });
+    return json(req, res, 200, { ok: true });
+  }
+  if (needsTotp(device)) return json(req, res, 401, { needTotp: true, error: '需要二次验证' });
+
+  if (route === '/api/devices') return json(req, res, 200, { devices: listDevices().map(d => deviceView(d, device)) });
+  if (route === '/api/devices/remove' && req.method === 'POST') {
+    const { id } = await readJson(req);
+    removeDevice(String(id));
+    console.log(`[unpair] 移除设备 ${id}（操作来自「${device.name}」）`);
+    return json(req, res, 200, { ok: true });
+  }
+  if (route === '/api/logout' && req.method === 'POST') {
+    removeDevice(device.id);
+    console.log(`[unpair] 设备「${device.name}」自己退出`);
+    return json(req, res, 200, { ok: true });
+  }
+  return json(req, res, 404, { error: 'not found' });
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   if (req.method === 'OPTIONS') {
@@ -812,25 +832,7 @@ const server = http.createServer(async (req, res) => {
   }
   // The same app also runs from GitHub Pages; there url.json holds the encrypted relay address instead.
   if (url.pathname === '/url.json') return json(req, res, 200, { self: true });
-  if (url.pathname === '/api/me') return json(req, res, 200, { loggedIn: tokenValid(bearer(req)) });
-  if (url.pathname === '/api/login' && req.method === 'POST') {
-    const ip = clientIp(req);
-    if (!originAllowed(req)) return json(req, res, 403, { error: 'bad origin' });
-    if (lockedOut(ip)) return json(req, res, 429, { error: '尝试次数过多，请 15 分钟后再试' });
-    let password = '';
-    try { password = JSON.parse(await readBody(req)).password; } catch {}
-    if (!safeEqual(password || '', PASSWORD)) {
-      recordFailure(ip);
-      return json(req, res, 401, { error: '密码错误' });
-    }
-    console.log(`[login] ip=${ip}`);
-    return json(req, res, 200, { token: issueToken() });
-  }
-  if (url.pathname === '/api/logout' && req.method === 'POST') {
-    sessions.delete(tokenKey(bearer(req)));
-    saveSessions();
-    return json(req, res, 200, { ok: true });
-  }
+  if (url.pathname.startsWith('/api/')) return handleApi(req, res, url.pathname);
   if (req.method === 'GET' && serveApp(res, url.pathname === '/' ? 'index.html' : url.pathname)) return;
   res.writeHead(404, SECURITY_HEADERS).end('not found');
 });
@@ -856,10 +858,12 @@ wss.on('connection', (ws, req) => {
     try { msg = JSON.parse(raw); } catch { return; }
     if (!session) {
       clearTimeout(authTimer);
-      if (msg.t !== 'auth' || !tokenValid(msg.token)) {
-        ws.send(JSON.stringify({ t: 'auth', ok: false }));
+      const device = msg.t === 'auth' ? findDevice(msg.token) : null;
+      if (!device || needsTotp(device)) {
+        ws.send(JSON.stringify({ t: 'auth', ok: false, needTotp: Boolean(device) }));
         return ws.close(4001, 'unauthorized');
       }
+      updateDevice(device.id, { lastSeen: Date.now() });
       session = new Session(ws);
       ws.send(JSON.stringify({ t: 'auth', ok: true }));
       console.log(`[+] client ${clientIp(req)}`);
@@ -884,6 +888,15 @@ wss.on('connection', (ws, req) => {
   });
 });
 
+// Until a first device exists, print a pairing QR so a fresh install works without extra commands.
+function offerFirstPairing() {
+  if (listDevices().length) return;
+  const base = appBase();
+  if (!base) return;
+  const { link, minutes } = createPairing(base);
+  printQr(`还没有配对的设备。用手机扫码完成配对（${minutes} 分钟内有效；过期后运行 npm run pair）`, link);
+}
+
 function printQr(label, url) {
   console.log(`\n${label}：${url}`);
   qrcode.generate(url, { small: true });
@@ -907,25 +920,6 @@ async function waitReachable(url) {
     await new Promise(r => setTimeout(r, 2000));
   }
   return false;
-}
-
-// The repo is public, so the address is encrypted with the login password; app/index.html decrypts it with WebCrypto.
-const KDF_ITERATIONS = 300000;
-
-function encryptUrl(url) {
-  const salt = crypto.randomBytes(16);
-  const iv = crypto.randomBytes(12);
-  const key = crypto.pbkdf2Sync(PASSWORD, salt, KDF_ITERATIONS, 32, 'sha256');
-  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
-  const data = Buffer.concat([cipher.update(JSON.stringify({ url }), 'utf8'), cipher.final(), cipher.getAuthTag()]);
-  return {
-    v: 1,
-    iter: KDF_ITERATIONS,
-    salt: salt.toString('base64'),
-    iv: iv.toString('base64'),
-    data: data.toString('base64'),
-    updated: new Date().toISOString(),
-  };
 }
 
 function appUrl() {
@@ -970,8 +964,8 @@ async function publishUrl(url) {
   try {
     const remote = await remoteShas();
     await putFile('url.json', Buffer.from(JSON.stringify(encryptUrl(url)) + '\n'), remote.get('url.json'));
-    console.log('已发布最新地址（GitHub Pages 约 1 分钟后生效）');
-    printQr('手机打开这个固定地址，可以「添加到主屏幕」装成 App', appUrl());
+    console.log(`已发布最新地址（GitHub Pages 约 1 分钟后生效）。手机 App 固定地址：${appUrl()}`);
+    offerFirstPairing();
   } catch (e) {
     console.log(`!! 发布地址失败：${e.message}`);
   }
@@ -985,8 +979,12 @@ function startTunnel() {
     if (m) {
       shown = true;
       console.log(`\n公网地址：${m[0]}`);
+      saveState({ relayUrl: m[0] });
       if (PUBLISH_REPO) publishUrl(m[0]);
-      else printQr('手机打开（每次重启地址会变；运行 npm run setup 可获得固定地址）', m[0]);
+      else {
+        console.log('（每次重启地址都会变，配对过的手机需要重新配对；运行 npm run setup 可获得固定地址）');
+        offerFirstPairing();
+      }
     }
   };
   child.stdout.on('data', scan);
@@ -998,14 +996,9 @@ function startTunnel() {
   process.on('SIGTERM', stop);
 }
 
-if (TUNNEL && PASSWORD.length < MIN_PASSWORD_LEN) {
-  console.log(`!! 公网模式要求密码至少 ${MIN_PASSWORD_LEN} 位，请修改 CR_PASSWORD`);
-  process.exit(1);
-}
-
 server.listen(PORT, TUNNEL ? '127.0.0.1' : HOST, async () => {
   console.log(`Cursor Remote Lite 已启动，端口 ${PORT}`);
-  console.log(`登录密码保存在 ${path.join(DATA_DIR, 'password')}（运行 npm run set-password 修改）`);
+  console.log(`已配对 ${listDevices().length} 台设备。添加新设备：npm run pair`);
   try {
     const wins = await listWindows();
     console.log(`已连上 Cursor，${wins.length} 个窗口：${wins.map(w => w.title).join(' | ')}`);
@@ -1019,6 +1012,9 @@ server.listen(PORT, TUNNEL ? '127.0.0.1' : HOST, async () => {
     const ips = Object.values(os.networkInterfaces()).flat()
       .filter(i => i && i.family === 'IPv4' && !i.internal).map(i => i.address);
     for (const ip of ips) console.log(`  局域网地址：http://${ip}:${PORT}/`);
-    if (ips[0]) printQr('同一 Wi-Fi 下手机扫码打开', `http://${ips[0]}:${PORT}/`);
+    if (ips[0]) {
+      saveState({ relayUrl: `http://${ips[0]}:${PORT}/` });
+      offerFirstPairing();
+    }
   }
 });

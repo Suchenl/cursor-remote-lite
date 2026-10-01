@@ -1,4 +1,4 @@
-// Interactive first-run setup: checks dependencies, sets the password, creates the GitHub Pages app, installs the service.
+// Interactive first-run setup: checks dependencies, creates the GitHub Pages app, installs the service.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -31,17 +31,9 @@ for (const [name, how] of missing) console.log(`  缺少 ${name}：${how}`);
 if (missing.length && !await yes('  缺少的工具只影响「外网访问 / 固定地址」，是否继续？')) process.exit(1);
 if (!missing.length) console.log('  cloudflared、gh 都已安装');
 
-console.log('\n2/4 登录密码');
-const pwFile = path.join(DATA_DIR, 'password');
-if (!fs.existsSync(pwFile) || await yes('  已有密码，要修改吗？', 'n')) {
-  rl.pause();
-  run('node', [path.join(DIR, 'set-password.mjs')], { stdio: 'inherit' });
-  rl.resume();
-}
-
-console.log('\n3/4 固定地址（手机 App）');
+console.log('\n2/4 固定地址（手机 App）');
 console.log('  在你的 GitHub 上建一个公开仓库，用 GitHub Pages 托管手机 App。');
-console.log('  仓库里只有 App 页面和「用你的密码加密过的」电脑地址，不含密码。');
+console.log('  仓库里只有 App 页面和加密过的电脑地址；解密钥匙只在配对时交给你的手机。');
 if (has('gh') && await yes('  要设置吗？')) {
   if (run('gh', ['auth', 'status']).status !== 0) {
     console.log('  先登录 GitHub：');
@@ -68,14 +60,23 @@ if (has('gh') && await yes('  要设置吗？')) {
   console.log(`  手机 App 地址：https://${login.toLowerCase()}.github.io/${name}/`);
 }
 
-console.log('\n4/4 后台服务');
+console.log('\n3/4 后台服务');
 if (isMac && await yes('  设为开机自启（后台常驻，崩溃自动重启）？')) {
   run('bash', [path.join(DIR, 'service.sh'), 'install'], { stdio: 'inherit' });
 } else {
   console.log('  手动启动：npm run public（外网）或 npm start（仅局域网）');
 }
 
+console.log('\n4/4 安全');
+console.log('  手机通过「配对」登录，不用密码：每台手机在电脑上扫一次码即可。');
+if (await yes('  要再加一层 Authenticator 二次验证吗（Google / Microsoft Authenticator）？', 'n')) {
+  rl.pause();
+  run('node', [path.join(DIR, 'twofa.mjs')], { stdio: 'inherit' });
+  rl.resume();
+}
+
 console.log(`
-完成！最后一步：用 ./start-cursor.sh 启动 Cursor（带调试端口），手机才能控制它。
-${config.publishRepo ? `手机打开 https://${config.publishRepo.split('/')[0].toLowerCase()}.github.io/${config.publishRepo.split('/')[1]}/ ，输入密码，再「添加到主屏幕」。` : ''}`);
+完成！还差两步：
+  1. 用 ./start-cursor.sh 重启 Cursor（带调试端口），手机才能控制它。
+  2. 运行 npm run pair，用手机扫码配对。以后每台新手机都这样配对一次。`);
 rl.close();

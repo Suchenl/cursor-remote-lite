@@ -50,8 +50,28 @@ public class MainActivity extends Activity {
             }
         });
 
-        if (state != null) web.restoreState(state);
-        else load();
+        if (!openPairLink(getIntent())) {
+            if (state != null) web.restoreState(state);
+            else load();
+        }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        openPairLink(intent);
+    }
+
+    // cursorremote://pair?app=<https app address>&d=<url key>.<one-time code>, handed over by the web app in a browser.
+    private boolean openPairLink(Intent intent) {
+        Uri u = intent == null ? null : intent.getData();
+        if (u == null || !"cursorremote".equals(u.getScheme())) return false;
+        String app = u.getQueryParameter("app");
+        String d = u.getQueryParameter("d");
+        if (app == null || d == null || !app.startsWith("https://") || !d.matches("[\\w-]+\\.[\\w-]+")) return false;
+        prefs.edit().putString("url", app).apply();
+        web.loadUrl(app + "#pair=" + d);
+        return true;
     }
 
     private String appUrl() {
@@ -90,7 +110,9 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void setUrl(String url) {
-            prefs.edit().putString("url", url).apply();
+            if (url == null || !url.startsWith("https://")) return;
+            // A pasted pairing link keeps its #pair fragment for this load, but only the address is remembered.
+            prefs.edit().putString("url", url.split("#")[0]).apply();
             runOnUiThread(() -> { web.clearHistory(); web.loadUrl(url); });
         }
 

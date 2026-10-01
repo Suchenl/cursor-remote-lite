@@ -1,20 +1,29 @@
 # Cursor Remote Lite
 
-在手机上用电脑里的 Cursor：看 Agent 回复、发消息、点「运行 / 接受」、切换窗口 / 模式 / 模型。
+在手机上用电脑里的 Cursor：看 Agent 回复、发消息、点「运行 / 接受」、预览文件、切换窗口 / 模式 / 模型。
 免费、开源、自托管，不需要服务器，也不需要手机和电脑在同一个 Wi-Fi。
 
 > 灵感来自 [len5ky/CursorRemote](https://github.com/len5ky/CursorRemote)，这是一个从零实现的免费版本。
 
+<p align="center"><img src="docs/quickstart.gif" width="300" alt="上手演示：预览文件、切换窗口、换模型、批准命令、发消息"></p>
+
+<p align="center"><sub>演示：点文件名预览 → 切到 SSH 窗口 → 换模型 → 批准命令 → 发消息并看 Agent 实时回复（演示数据）</sub></p>
+
+## 界面
+
+| 聊天 | 文件预览 | 切换窗口 | 选模型 |
+|:-:|:-:|:-:|:-:|
+| <img src="docs/ui-chat.png" width="190" alt="聊天"> | <img src="docs/ui-file.png" width="190" alt="文件预览"> | <img src="docs/ui-windows.png" width="190" alt="切换窗口"> | <img src="docs/ui-model.png" width="190" alt="选模型"> |
+
 ## 功能
 
 - **聊天模式**：像聊天 App 一样看 Agent 对话（气泡、工具调用卡片、思考过程），直接输入发送，Agent 停下来等你确认时，按钮会出现在手机上。
-- **文件预览**：对话里出现的文件名（蓝色下划线）、编辑过文件的工具卡片，点一下就能全屏查看文件内容，带行号；图片直接显示。SSH 远程窗口的文件通过 `ssh` 读取（要求电脑能免密 ssh 到那台机器，用 Cursor 连 SSH 的电脑一般都已配置好）。
+- **文件预览**：对话里出现的文件名（蓝色）、带 📄 的工具卡片，点一下就能全屏查看文件内容，带行号；图片直接显示。SSH 远程窗口的文件通过 `ssh` 读取（要求电脑能免密 ssh 到那台机器，用 Cursor 连 SSH 的电脑一般都已配置好）。
 - **屏幕模式**：实时画面，可以只看聊天面板或整个窗口，点按 / 滚动 / 缩放 / 常用按键都会传到电脑上。
-- **多窗口**：点顶部标题切换窗口，SSH 远程窗口、Agents 窗口都能选；也能一键打开 Cursor Agents 窗口。
+- **多窗口**：点左上角窗口名切换窗口，SSH 远程窗口、Agents 窗口都能选；也能一键打开 Cursor Agents 窗口。
 - **模式 / 模型 / 历史对话**：手机上直接切 Agent / Plan / Ask，换模型，打开历史对话，新建对话。
-- **装成 App**：「添加到主屏幕」后全屏打开，没有浏览器地址栏。
-- **固定地址**：App 放在你自己的 GitHub Pages 上，电脑重启、隧道地址变化都不用重新扫码。
-- **安全**：密码登录（失败锁定），GitHub 上只有用密码加密过的电脑地址，没有密码就打不开。
+- **设备配对**：不用密码。电脑上生成一次性二维码，手机扫一下就配对好了；可选 Authenticator 二次验证。
+- **固定地址**：App 放在你自己的 GitHub Pages 上，电脑重启、隧道地址变化都不用重新配对。
 
 ## 原理
 
@@ -26,56 +35,146 @@ Cursor 基于 Electron，用 `--remote-debugging-port` 启动后，中继通过 
 
 ## 要求
 
-- macOS（Windows / Linux 上 `server.mjs` 也能跑，但启动和后台服务脚本只支持 macOS）
+- macOS（Windows / Linux 上 `server.mjs` 也能跑，但启动和后台服务脚本只支持 macOS，见下文「Windows」）
 - Node.js 22+
 - [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)：外网访问，`brew install cloudflared`
 - [GitHub CLI](https://cli.github.com/)：固定地址，`brew install gh`
 
-## 安装
+## 快速上手（5 分钟）
+
+**第 1 步：在电脑上安装**
 
 ```bash
 git clone https://github.com/Suchenl/cursor-remote-lite.git
 cd cursor-remote-lite
 npm install
-npm run setup        # 设密码、创建手机 App 仓库、设置开机自启
+npm run setup        # 创建手机 App 仓库、设置开机自启，可选开启二次验证
 ./start-cursor.sh    # 让 Cursor 带调试端口重启（会先退出当前 Cursor）
 ```
 
-`npm run setup` 结束时会打印你的手机 App 地址，形如 `https://<你的GitHub用户名>.github.io/cursor-remote-app/`。
-用手机打开，输入密码，然后：
+**第 2 步：配对手机**
 
-- **iPhone**：Safari → 分享 → 添加到主屏幕
-- **Android**：下载 [CursorRemote.apk](https://github.com/Suchenl/cursor-remote-lite/releases/latest/download/CursorRemote.apk) 安装，首次打开填入上面的地址。
+```bash
+npm run pair
+```
+
+终端里会出现一个二维码（10 分钟内有效，只能用一次）。用手机相机或浏览器扫码打开即可，没有密码要输。
+扫不了码的话，把二维码下面的链接发到手机上打开（或者粘贴到 App 的输入框里）。
+
+<p align="center"><img src="docs/ui-pair.png" width="220" alt="未配对时的界面"></p>
+
+**第 3 步：装到手机上（可选，但推荐）**
+
+- **iPhone**：Safari 打开后 → 分享 → 添加到主屏幕
+- **Android**：下载 [CursorRemote.apk](https://github.com/Suchenl/cursor-remote-lite/releases/latest/download/CursorRemote.apk) 安装，然后用手机扫配对码，浏览器会提示「在 App 中打开」，点一下就配对进 App 了（配对码用过了就再运行一次 `npm run pair`）。
   华为等没有谷歌服务的手机也能用（浏览器的「安装应用」在这些手机上通常不可用）。
   注意：纯血鸿蒙（HarmonyOS NEXT / 5.0 及以上）不能直接装 APK，需要先装「卓易通」。
 
+**第 4 步：开始用**
+
+- 左上角是当前窗口，点它切换窗口（本地 / SSH / Agents）。
+- 底部输入框发消息；`Agent ▾` / `Auto ▾` 切模式和模型；「历史」打开以前的对话，「＋ 新建」开新对话。
+- Agent 等你确认时（运行命令、接受修改），按钮会直接出现在对话里。
+- 点蓝色文件名或带 📄 的卡片预览文件，按返回键关闭。
+- 右上角「画面」切到实时画面，可以直接点 Cursor 界面上的任何东西。
+
 以后每次 Cursor 重启都要带调试端口，用 `./start-cursor.sh` 启动即可。
+
+## 让电脑一直在线（防睡眠）
+
+中继跑在你的电脑上，**电脑一睡眠，手机就连不上了**。
+
+| | 锁屏 | 屏幕关闭（熄屏） | 睡眠 / 合盖 |
+|---|---|---|---|
+| 手机还能用吗 | ✅ 能 | ✅ 能（屏幕模式改为定时截图，稍卡） | ❌ 不能 |
+
+所以要做的只有一件事：**允许关屏幕和锁屏，但不让系统睡眠**。
+
+### macOS
+
+**笔记本（插着电源时不睡眠）**：系统设置 → 电池 → 选项 → 打开「使用电源适配器且显示器关闭时，防止自动进入睡眠」。
+或者用命令（只影响插电状态，`-c` = charger）：
+
+```bash
+sudo pmset -c sleep 0          # 插电时永不睡眠
+sudo pmset -c displaysleep 10  # 屏幕照常 10 分钟后关闭（省电，不影响使用）
+pmset -g | grep -E " sleep|displaysleep"   # 查看当前设置
+```
+
+**台式机（Mac mini / iMac / Studio）**：系统设置 → 节能 → 打开「显示器关闭时，防止自动进入睡眠」。
+
+**只想临时不睡**（比如出门前让 Agent 跑个长任务）：
+
+```bash
+caffeinate -s    # 插电时阻止睡眠，按 Ctrl+C 恢复
+```
+
+**合盖**：MacBook 合盖一定会睡眠（除非外接显示器 + 电源 + 键盘）。要远程用就别合盖，把屏幕亮度调到最低、锁屏即可。
+不建议用 `sudo pmset -a disablesleep 1` 强行禁止合盖睡眠：放进包里会过热。
+
+### Windows
+
+设置 → 系统 → 电源和电池 → 屏幕和睡眠：「接通电源后，使设备进入睡眠状态」选 **从不**；「关闭屏幕」可以保留（比如 10 分钟）。
+或者用管理员 PowerShell：
+
+```powershell
+powercfg /change standby-timeout-ac 0     # 插电时永不睡眠
+powercfg /change monitor-timeout-ac 10    # 屏幕 10 分钟后关闭
+powercfg /change hibernate-timeout-ac 0   # 插电时不休眠
+# 笔记本合盖不睡眠（插电时）：
+powercfg /setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 0
+powercfg /setactive SCHEME_CURRENT
+```
+
+Windows 上的启动方式：用 `"%LOCALAPPDATA%\Programs\cursor\Cursor.exe" --remote-debugging-port=9222` 启动 Cursor，再在项目目录运行 `npm run public`（窗口不要关）。`npm run pair` 照常使用。
+
+### 代价
+
+- **耗电**：笔记本熄屏待机约 3–8 W，一天不到 0.2 度电；台式机 30–100 W，一天 1–2 度电。
+- **电池**：笔记本长期插电满电会加速电池老化。macOS 的「优化电池充电」、Windows 厂商的「电池保护 / 充电上限 80%」可以缓解，建议打开。
+- **安全**：电脑一直开着，等于一直可以被已配对的手机控制。请保持锁屏（锁屏不影响使用），不用的设备及时在「⋯ → 已配对设备」里移除。
+
+### 不配置会怎样
+
+- 电脑睡眠后，手机显示「电脑不在线」，什么都做不了；**Agent 正在跑的任务也会暂停**，直到有人唤醒电脑。
+- 唤醒后服务会自动恢复。隧道地址会变，但会自动发布新地址，手机约 1 分钟后自动重连，**不需要重新配对**。
+
+## 安全说明
+
+- **配对**：`npm run pair` 生成的链接包含一个随机密钥和一次性配对码，10 分钟后失效、用过即作废。手机配对后拿到一个设备令牌，电脑上只保存它的哈希。
+- **GitHub 上没有可破解的东西**：Pages 仓库里的 `url.json`（电脑地址）用随机 256 位密钥加密，这个密钥只通过配对链接传给手机，从不上传。没有密码，也就不存在离线暴力破解密码的问题。
+- **二次验证（可选）**：`npm run 2fa` 绑定 Google Authenticator / Microsoft Authenticator / 1Password 等。开启后，配对新设备时必须输入 6 位验证码；还可以设置每 N 天重新验证一次（默认 30 天，填 0 表示只在配对时验证）。即使配对链接泄露，没有你的手机验证码也配不上。
+- **管理设备**：手机上「⋯ → 已配对设备」可以查看和移除，或在电脑上 `npm run devices`。移除后那台设备立即断开。
+- 调试端口 9222 只监听本机；公网模式下中继也只监听 `127.0.0.1`，外部只能通过隧道访问。
+- 配对失败多次会临时锁定。
+- 能配对的设备可以完全控制你的 Cursor，等同于能在你电脑上执行命令。**不要把配对链接发到群里或公开的地方。**
 
 ## 常用命令
 
 | 命令 | 作用 |
 |---|---|
 | `npm run setup` | 安装向导（可重复运行） |
-| `npm run set-password` | 修改密码（会注销所有已登录设备） |
+| `npm run pair` | 配对一台新设备（显示二维码） |
+| `npm run devices` | 查看已配对设备；`npm run devices remove <id>` 移除 |
+| `npm run 2fa` | 开启 / 重新绑定 Authenticator 二次验证；`npm run 2fa off` 关闭；`npm run 2fa status` 查看 |
 | `npm run public` | 前台运行（外网 + 固定地址） |
 | `npm start` | 前台运行（只在局域网） |
 | `./service.sh status / logs / uninstall` | 后台服务状态 / 日志 / 卸载 |
-| `npm run reset` | 删除密码、配置和所有登录状态 |
-
-## 安全说明
-
-- 能登录的人可以完全控制你的 Cursor，等同于能在你电脑上执行命令。请用足够长的密码（向导要求至少 10 位、包含字母和数字）。
-- 密码只存在本机 `~/.cursor-remote-lite/password`，不会上传。GitHub 仓库里的 `url.json` 是用密码加密过的（PBKDF2 + AES-GCM）。
-- 调试端口 9222 只监听本机；公网模式下中继也只监听 `127.0.0.1`，外部只能通过隧道访问。
-- 连续输错密码会被锁定 15 分钟。
+| `npm run reset` | 清除所有配对、二次验证和配置（之后要重新配对） |
 
 ## 常见问题
 
 **手机上显示「未连接到 Cursor」**：Cursor 没带调试端口启动，运行 `./start-cursor.sh`。
 
+**手机上显示「电脑不在线」**：电脑睡眠 / 关机，或服务刚重启（新地址约 1 分钟后生效，会自动重试）。见上文「防睡眠」。
+
+**换了手机 / 清了浏览器数据**：在电脑上 `npm run pair` 重新配对，旧设备在「已配对设备」里删掉。
+
 **公司网络打不开**：Cloudflare 隧道走 443 端口，一般都能用；如果连 `trycloudflare.com` 都被拦，就只能在同一局域网下用 `npm start`。
 
-**SSH 远程窗口看不到**：点顶部标题打开窗口列表，列表每次打开都会刷新。
+**SSH 远程窗口看不到**：点左上角窗口名打开窗口列表，列表每次打开都会刷新。
+
+**点文件提示找不到**：文件可能已被删除或移动；SSH 窗口的文件需要电脑能免密 `ssh` 到那台机器。
 
 ## 赞赏
 
