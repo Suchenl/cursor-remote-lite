@@ -1,10 +1,17 @@
 package com.cursorremote.lite;
 
 import android.app.Activity;
+import android.app.DownloadManager;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
+import android.widget.Toast;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
@@ -13,11 +20,23 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
+import java.io.File;
+
 // A thin WebView shell around the user's GitHub Pages app, so it installs without Google Play services or PWA support.
 public class MainActivity extends Activity {
     private static final String SETUP = "file:///android_asset/setup.html";
+    private static final String APK_MIME = "application/vnd.android.package-archive";
+    private static final String UPDATE_FILE = "CursorRemote-update.apk";
     private WebView web;
     private SharedPreferences prefs;
+
+    private final BroadcastReceiver downloaded = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context c, Intent i) {
+            long id = i.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1);
+            if (id != -1 && id == prefs.getLong("updateId", -2)) installUpdate(id);
+        }
+    };
 
     @Override
     protected void onCreate(Bundle state) {
@@ -50,9 +69,51 @@ public class MainActivity extends Activity {
             }
         });
 
+        IntentFilter done = new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE);
+        // The broadcast comes from the system download provider, a separate app.
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(downloaded, done, Context.RECEIVER_EXPORTED);
+        else registerReceiver(downloaded, done);
+
         if (!openPairLink(getIntent())) {
             if (state != null) web.restoreState(state);
             else load();
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        unregisterReceiver(downloaded);
+        super.onDestroy();
+    }
+
+    private void downloadUpdate(String url) {
+        DownloadManager dm = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+        long previous = prefs.getLong("updateId", -1);
+        if (previous != -1) dm.remove(previous);
+        File dir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
+        if (dir != null) new File(dir, UPDATE_FILE).delete();
+        DownloadManager.Request r = new DownloadManager.Request(Uri.parse(url))
+                .setTitle("Cursor Remote 更新")
+                .setMimeType(APK_MIME)
+                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
+                .setDestinationInExternalFilesDir(this, Environment.DIRECTORY_DOWNLOADS, UPDATE_FILE);
+        prefs.edit().putLong("updateId", dm.enqueue(r)).apply();
+        Toast.makeText(this, "正在下载新版本，下载完会弹出安装界面", Toast.LENGTH_LONG).show();
+    }
+
+    private void installUpdate(long id) {
+        Uri apk = ((DownloadManager) getSystemService(DOWNLOAD_SERVICE)).getUriForDownloadedFile(id);
+        if (apk == null) {
+            Toast.makeText(this, "下载失败，请稍后在菜单里重试", Toast.LENGTH_LONG).show();
+            return;
+        }
+        Intent install = new Intent(Intent.ACTION_VIEW)
+                .setDataAndType(apk, APK_MIME)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+        try {
+            startActivity(install);
+        } catch (Exception e) {
+            Toast.makeText(this, "无法打开安装界面，请到浏览器下载安装", Toast.LENGTH_LONG).show();
         }
     }
 
@@ -124,6 +185,12 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void changeUrl() {
             runOnUiThread(() -> web.loadUrl(SETUP + "?change=1"));
+        }
+
+        @JavascriptInterface
+        public void update(String url) {
+            if (url == null || !url.startsWith("https://")) return;
+            runOnUiThread(() -> downloadUpdate(url));
         }
     }
 }

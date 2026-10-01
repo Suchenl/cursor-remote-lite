@@ -485,6 +485,7 @@ function connect() {
       send({ t: 'attach', id: store.get('window') || '' });
       sentWidth = 0;
       applyQuality();
+      setTimeout(checkAppUpdate, 3000);
     }
     else if (m.t === 'chat') renderChat(m.chat);
     else if (m.t === 'frame') onFrame(m);
@@ -571,7 +572,11 @@ function showDonate() {
 }
 
 function showMainMenu() {
+  const update = apkUpdate()
+    ? `<button class="opt" data-act="appUpdate"><span class="lbl">更新安卓 App（v${esc(appVersion)} → v${esc(apkUpdate())}）</span><span class="tag">新</span></button>`
+    : `<button class="opt" data-act="appUpdate"><span class="lbl">检查 App 更新（当前 v${esc(appVersion)}）</span></button>`;
   openSheet('main', `<h3>菜单</h3>
+    ${inApp && appVersion ? update : ''}
     ${inApp ? '<button class="opt" data-act="changeUrl"><span class="lbl">更换 App 地址</span></button>'
       : standalone() ? '' : '<button class="opt" data-act="install"><span class="lbl">安装到手机桌面（像 App 一样打开）</span></button>'}
     <button class="opt" data-act="reconnect"><span class="lbl">重新连接</span></button>
@@ -587,6 +592,41 @@ const APK_RELEASE = 'https://github.com/Suchenl/cursor-remote-lite/releases/late
 let apkUrl = APK_RELEASE;
 fetch('CursorRemote.apk', { method: 'HEAD' }).then(r => { if (r.ok) apkUrl = new URL('CursorRemote.apk', location.href).href; }).catch(() => {});
 const appAddress = () => location.origin + location.pathname.replace(/index\.html$/, '');
+
+// The page itself updates with GitHub Pages; only the Android shell needs a new APK now and then.
+const appVersion = /CursorRemoteApp\/v?([\d.]+)/.exec(navigator.userAgent)?.[1];
+const newerThan = (a, b) => {
+  const x = a.split('.').map(Number), y = b.split('.').map(Number);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
+  return false;
+};
+const apkUpdate = () => {
+  const latest = store.get('apkLatest');
+  return appVersion && latest && newerThan(latest, appVersion) ? latest : null;
+};
+async function checkAppUpdate(manual = false) {
+  if (!inApp || !appVersion) return;
+  if (!manual && Date.now() - (store.get('apkChecked') || 0) < 6 * 3600e3) return;
+  try {
+    const r = await fetch('https://api.github.com/repos/Suchenl/cursor-remote-lite/releases/latest', { cache: 'no-store' });
+    if (!r.ok) throw new Error();
+    store.set('apkLatest', String((await r.json()).tag_name || '').replace(/^v/, ''));
+    store.set('apkChecked', Date.now());
+  } catch {
+    if (manual) status('检查更新失败，请稍后再试', false);
+    return;
+  }
+  if (apkUpdate()) status(`安卓 App 有新版本 v${apkUpdate()}，点右上角「⋯」更新`);
+  else if (manual) status('已经是最新版本');
+}
+function installAppUpdate() {
+  if (window.CursorRemoteApp?.update) {
+    window.CursorRemoteApp.update(apkUrl);
+    status('正在下载新版本，下载完会弹出安装界面');
+  }
+  // Older shells can't download: an off-site link opens in the system browser instead.
+  else location.href = APK_RELEASE;
+}
 
 function showInstallHelp() {
   const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
@@ -614,6 +654,10 @@ $('sheet').addEventListener('click', async e => {
     await navigator.clipboard?.writeText(appAddress()).then(() => status('已复制地址'), () => status('复制失败，请手动记下地址', false));
   }
   else if (act === 'changeUrl') window.CursorRemoteApp?.changeUrl();
+  else if (act === 'appUpdate') {
+    if (apkUpdate()) { closeSheet(); installAppUpdate(); }
+    else { await checkAppUpdate(true); if (apkUpdate()) showMainMenu(); }
+  }
   else if (act === 'reconnect') { closeSheet(); ws?.close(); }
   else if (act === 'donate') showDonate();
   else if (act === 'devices') showDevices();
