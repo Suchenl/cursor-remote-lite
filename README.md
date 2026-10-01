@@ -15,6 +15,37 @@
 |:-:|:-:|:-:|:-:|
 | <img src="docs/ui-chat.png" width="190" alt="聊天"> | <img src="docs/ui-file.png" width="190" alt="文件预览"> | <img src="docs/ui-windows.png" width="190" alt="切换窗口"> | <img src="docs/ui-model.png" width="190" alt="选模型"> |
 
+## 为什么做这个
+
+Agent 一跑就是十几分钟，中间经常停下来等你点「运行」或回答一个问题。人一离开电脑，任务就卡在那里。
+想要的很简单：**在手机上看到电脑里 Cursor 正在发生什么，并且能接着操作**。不把代码搬到云上，不额外付订阅费，安卓和国内网络也能用。
+
+现有方案都差一点：
+
+- **Cursor 官方手机端**（Cursor for iOS + Remote Control）：只有 iPhone / iPad（iOS 26+），安卓还没有原生 App；需要付费套餐；Remote Control 只支持 Agents 窗口，并且 Agent 的推理循环会转到 Cursor 云端。普通编辑器窗口、SSH 远程窗口里的对话管不了。
+- **[len5ky/CursorRemote](https://github.com/len5ky/CursorRemote)**：思路相同（通过调试端口控制本机 Cursor），但需要 $7.99/月的许可证，代码是 source-available 而非开源；外网访问要自己配 Tailscale 或 Telegram 机器人。
+- **远程桌面**（向日葵、ToDesk、RustDesk、Chrome 远程桌面）：什么都能控制，但在手机小屏上看 Cursor 的聊天面板、点小按钮非常吃力，也费流量。
+
+## 和其他方案的区别
+
+| | Cursor Remote Lite（本项目） | Cursor 官方 iOS App | len5ky/CursorRemote | 远程桌面 |
+|---|---|---|---|---|
+| 价格 | 免费 | 需要 Cursor 付费套餐 | $7.99/月 | 多数免费 / 付费 |
+| 许可证 | MIT 开源 | 闭源 | source-available | — |
+| 手机 | 安卓 App、iPhone、任意浏览器 | 仅 iPhone / iPad | 任意浏览器、Telegram | 各平台 App |
+| 能控制的窗口 | 所有窗口：本地、SSH 远程、Agents | 仅 Agents 窗口（Remote Control） | 本机窗口 | 整个桌面 |
+| 代码 / 对话经过哪里 | 只在你的电脑，经 Cloudflare 隧道（HTTPS）传到手机 | Agent 循环在 Cursor 云端 | 你的电脑 + 局域网 / Tailscale | 远程桌面厂商的服务器 |
+| 外网访问 | 自带，免配置；地址固定 | 自带 | 需自己配 Tailscale / Telegram | 自带 |
+| 手机上的体验 | 聊天界面 + 实时画面，文件预览 | 原生 App，推送通知 | 聊天界面 | 缩小的电脑屏幕 |
+| 电脑需要开着 | 需要（不能睡眠） | 云端 Agent 不需要；Remote Control 需要 | 需要 | 需要 |
+
+**本项目的不足**，也写在这里：
+
+- 没有推送通知（Agent 完成时手机不会响），要自己打开看。
+- 靠读取 Cursor 的界面实现，Cursor 大改版后可能需要跟着更新。
+- 后台服务和启动脚本目前只支持 macOS；Windows 需要手动启动（见下文）。
+- 免费的 Cloudflare 快速隧道没有可用性保证，偶尔会断开重连。
+
 ## 功能
 
 - **聊天模式**：像聊天 App 一样看 Agent 对话（气泡、工具调用卡片、思考过程），直接输入发送，Agent 停下来等你确认时，按钮会出现在手机上。
@@ -51,6 +82,8 @@ npm install
 npm run setup        # 创建手机 App 仓库、设置开机自启，可选开启二次验证
 ./start-cursor.sh    # 让 Cursor 带调试端口重启（会先退出当前 Cursor）
 ```
+
+`npm run setup` 会在**你自己的** GitHub 账号下创建一个公开仓库（默认叫 `cursor-remote-app`），用 GitHub Pages 托管手机 App 和加密过的电脑地址。每个人用自己的，和作者或其他用户都没有关系。
 
 **第 2 步：配对手机**
 
@@ -169,6 +202,13 @@ Windows 上的启动方式：用 `"%LOCALAPPDATA%\Programs\cursor\Cursor.exe" --
 **手机上显示「电脑不在线」**：电脑睡眠 / 关机，或服务刚重启（新地址约 1 分钟后生效，会自动重试）。见上文「防睡眠」。
 
 **换了手机 / 清了浏览器数据**：在电脑上 `npm run pair` 重新配对，旧设备在「已配对设备」里删掉。
+
+**要花钱吗？会用掉什么免费额度吗？** 不会。运行时只用到三样东西：
+- Cloudflare 快速隧道：免费，不用注册。
+- GitHub Pages：公开仓库免费。电脑每次重启发布一次地址（一次提交）；Pages 建议每小时不超过 10 次构建，超过也只是稍晚生效。
+- GitHub API：每小时 5000 次额度，实际只用几次。
+
+GitHub Actions 只在作者发布新版 APK 时用到，用户这边不会运行。
 
 **公司网络打不开**：Cloudflare 隧道走 443 端口，一般都能用；如果连 `trycloudflare.com` 都被拦，就只能在同一局域网下用 `npm start`。
 
