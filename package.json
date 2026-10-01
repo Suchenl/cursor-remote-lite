@@ -9,7 +9,7 @@
     "start": "node server.mjs",
     "public": "node server.mjs --tunnel",
     "set-password": "node set-password.mjs",
-    "reset": "node -e \"require('fs').rmSync(require('os').homedir()+'/.cursor-remote-lite',{recursive:true,force:true});console.log('已重置密码、配置并注销所有已登录设备')\""
+    "reset": "node -e \"const d=require('os').homedir()+'/.cursor-remote-lite/';for(const f of ['password','sessions.json','config.json'])require('fs').rmSync(d+f,{force:true});console.log('已重置密码、配置并注销所有已登录设备')\""
   },
   "engines": {
     "node": ">=22"

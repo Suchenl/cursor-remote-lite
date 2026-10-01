@@ -96,6 +96,7 @@
   #sheet h3 { margin: 2px 4px 10px; font-size: 15px; color: #ccc; font-weight: 600; }
   .opt { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 11px 12px; margin-bottom: 6px; white-space: normal; }
   .opt .lbl { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .opt .sub { display: block; font-size: 12px; color: #888; margin-top: 2px; }
   .opt .tag { flex: none; font-size: 11px; padding: 1px 6px; border-radius: 4px; background: #3a3d41; color: #bbb; }
   .opt.cur { border-color: #1177bb; }
   .opt.cur::after { content: "✓"; color: #4af; flex: none; }
@@ -401,7 +402,7 @@ function connect() {
     else if (m.t === 'attached') {
       store.set('window', m.id);
       currentWindow = m.id;
-      $('titleText').textContent = m.title;
+      $('titleText').textContent = winLabel(m.title).name;
       send({ t: 'windows' });
     }
     else if (m.t === 'menu') showMenu(m.kind, m.items);
@@ -427,9 +428,17 @@ $('shade').onclick = closeSheet;
 
 const KIND_TAG = { agents: 'Agents', ssh: 'SSH', local: '本地' };
 
+// Cursor titles look like "file.py — Folder [SSH: host]"; the window is identified by folder (+ host), not the open file.
+function winLabel(title) {
+  const host = /\[SSH: ([^\]]+)\]/.exec(title)?.[1];
+  const parts = title.replace(/\s*\[SSH: [^\]]+\]\s*$/, '').split(' — ').map(s => s.replace(/^●\s*/, '').trim());
+  const folder = parts.pop() || title;
+  return { name: host ? `${folder} · ${host}` : folder, file: parts.join(' — ') };
+}
+
 function showWindows() {
   const rows = windows.map(w => `<button class="opt ${w.id === currentWindow ? 'cur' : ''}" data-win="${esc(w.id)}">
-    <span class="tag">${KIND_TAG[w.kind] || ''}</span><span class="lbl">${esc(w.title || w.id)}</span></button>`).join('');
+    <span class="tag">${KIND_TAG[w.kind] || ''}</span><span class="lbl">${esc(winLabel(w.title || w.id).name)}${winLabel(w.title || '').file ? `<span class="sub">${esc(winLabel(w.title).file)}</span>` : ''}</span></button>`).join('');
   const hasAgents = windows.some(w => w.kind === 'agents');
   openSheet('windows', `<h3>切换 Cursor 窗口</h3>${rows || '<div class="hint">没有找到窗口</div>'}
     <button class="opt" data-act="agentsWindow"><span class="lbl">${hasAgents ? '切到 Agents 窗口（Agent 模式）' : '打开 Agents 窗口（Agent 模式）'}</span></button>
@@ -462,18 +471,32 @@ function showDonate() {
 
 function showMainMenu() {
   openSheet('main', `<h3>菜单</h3>
-    ${standalone() ? '' : '<button class="opt" data-act="install"><span class="lbl">安装到手机桌面（像 App 一样打开）</span></button>'}
+    ${inApp ? '<button class="opt" data-act="changeUrl"><span class="lbl">更换 App 地址</span></button>'
+      : standalone() ? '' : '<button class="opt" data-act="install"><span class="lbl">安装到手机桌面（像 App 一样打开）</span></button>'}
     <button class="opt" data-act="reconnect"><span class="lbl">重新连接</span></button>
     ${donate ? '<button class="opt" data-act="donate"><span class="lbl">赞赏作者 ☕</span></button>' : ''}
     <button class="opt" data-act="logout"><span class="lbl">退出登录</span></button>`);
 }
 $('menuBtn').onclick = showMainMenu;
 
+const inApp = /CursorRemoteApp/.test(navigator.userAgent);
+const APK_RELEASE = 'https://github.com/Suchenl/cursor-remote-lite/releases/latest/download/CursorRemote.apk';
+// A copy on the user's own GitHub Pages downloads more reliably in mainland China than GitHub Releases.
+let apkUrl = APK_RELEASE;
+fetch('CursorRemote.apk', { method: 'HEAD' }).then(r => { if (r.ok) apkUrl = new URL('CursorRemote.apk', location.href).href; }).catch(() => {});
+const appAddress = () => location.origin + location.pathname.replace(/index\.html$/, '');
+
 function showInstallHelp() {
   const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
-  openSheet('install', `<h3>安装到桌面</h3><div class="hint">${ios
-    ? '用 Safari 打开本页 → 点底部「分享」按钮 → 选「添加到主屏幕」。'
-    : '点浏览器右上角（或底部）菜单 → 选「安装应用」或「添加到主屏幕」。<br>安装后从桌面图标打开，就是全屏 App，没有浏览器地址栏。'}</div>`);
+  if (ios) {
+    return openSheet('install', `<h3>安装到桌面</h3><div class="hint">用 Safari 打开本页 → 点底部「分享」按钮 → 选「添加到主屏幕」。<br>安装后从桌面图标打开，就是全屏 App。</div>`);
+  }
+  openSheet('install', `<h3>安装安卓 App</h3>
+    <a class="opt" href="${esc(apkUrl)}"><span class="lbl">下载安卓 App（推荐）</span><span class="tag">APK</span></a>
+    <div class="hint">华为等没有谷歌服务的手机、任何浏览器都能装。下载后点开安装（如提示「未知来源」，允许即可）。<br>
+      首次打开填入这个地址：</div>
+    <button class="opt" data-act="copyAddress"><span class="lbl">${esc(appAddress())}</span><span class="tag">复制</span></button>
+    ${installEvent ? '<button class="opt" data-act="browserInstall"><span class="lbl">或者：用浏览器安装（需要谷歌服务）</span></button>' : ''}`);
 }
 
 $('sheet').addEventListener('click', async e => {
@@ -483,10 +506,12 @@ $('sheet').addEventListener('click', async e => {
   if (b.dataset.kind) { closeSheet(); status('切换中…'); return send({ t: 'pickMenu', kind: b.dataset.kind, label: b.dataset.label }); }
   const act = b.dataset.act;
   if (act === 'agentsWindow') { closeSheet(); status('正在打开 Agents 窗口…'); send({ t: 'agentsWindow' }); }
-  else if (act === 'install') {
-    if (installEvent) { closeSheet(); installEvent.prompt(); installEvent = null; }
-    else showInstallHelp();
+  else if (act === 'install') showInstallHelp();
+  else if (act === 'browserInstall') { closeSheet(); installEvent?.prompt(); installEvent = null; }
+  else if (act === 'copyAddress') {
+    await navigator.clipboard?.writeText(appAddress()).then(() => status('已复制地址'), () => status('复制失败，请手动记下地址', false));
   }
+  else if (act === 'changeUrl') window.CursorRemoteApp?.changeUrl();
   else if (act === 'reconnect') { closeSheet(); ws?.close(); }
   else if (act === 'donate') showDonate();
   else if (act === 'logout') {

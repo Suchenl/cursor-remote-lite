@@ -45,7 +45,9 @@ npm run setup        # 设密码、创建手机 App 仓库、设置开机自启
 用手机打开，输入密码，然后：
 
 - **iPhone**：Safari → 分享 → 添加到主屏幕
-- **Android**：Chrome → ⋮ → 安装应用 / 添加到主屏幕
+- **Android**：下载 [CursorRemote.apk](https://github.com/Suchenl/cursor-remote-lite/releases/latest/download/CursorRemote.apk) 安装，首次打开填入上面的地址。
+  华为等没有谷歌服务的手机也能用（浏览器的「安装应用」在这些手机上通常不可用）。
+  注意：纯血鸿蒙（HarmonyOS NEXT / 5.0 及以上）不能直接装 APK，需要先装「卓易通」。
 
 以后每次 Cursor 重启都要带调试端口，用 `./start-cursor.sh` 启动即可。
 
