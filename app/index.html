@@ -73,6 +73,7 @@
   #queueBar .run i { width: 8px; height: 8px; border-radius: 50%; background: #4af; flex: none; animation: pulse 1.2s ease-in-out infinite; }
   @keyframes pulse { 50% { opacity: .25; } }
   #queueBar .qh { font-size: 12px; color: #999; }
+  #queueBar .qh.fold { background: none; border: none; padding: 2px 0; text-align: left; color: #9cc8ff; font-size: 12.5px; }
   #queueBar .q { display: flex; align-items: center; gap: 6px; font-size: 13.5px; }
   #queueBar .q .qt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #ccc; }
   #queueBar .q .qt::before { content: "○ "; color: #777; }
@@ -97,7 +98,9 @@
   #chatTools #pickModel { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .row { display: flex; gap: 8px; min-width: 0; align-items: flex-end; }
   textarea { flex: 1; min-width: 0; min-height: 40px; max-height: 32vh; padding: 9px 10px; resize: none; font-size: 16px; line-height: 1.35; }
-  #mic { flex: none; height: 40px; width: 40px; padding: 0; display: flex; align-items: center; justify-content: center; color: #bbb; }
+  #img { flex: none; height: 40px; width: 40px; padding: 0; display: flex; align-items: center; justify-content: center; color: #bbb; }
+  #mic { display: none; }
+  body.voice #mic { flex: none; height: 40px; width: 40px; padding: 0; display: flex; align-items: center; justify-content: center; color: #bbb; }
   #mic.on { color: #fff; background: #c33; border-color: #e55; animation: pulse 1.2s ease-in-out infinite; }
   #send { flex: none; height: 40px; padding: 0 16px; background: #0e639c; border-color: #1177bb; color: #fff; font-weight: 600; }
   #msg { font-size: 12px; color: #888; min-height: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -115,6 +118,10 @@
   .opt .tag { flex: none; font-size: 11px; padding: 1px 6px; border-radius: 4px; background: #3a3d41; color: #bbb; }
   .opt.cur { border-color: #1177bb; }
   .opt.cur::after { content: "✓"; color: #4af; flex: none; }
+  .askQ { white-space: pre-line; line-height: 1.5; margin: 6px 4px 16px !important; color: #e6e6e6 !important; }
+  .askBtns { display: flex; gap: 10px; }
+  .askBtns button { flex: 1; padding: 12px; font-size: 15px; }
+  button.danger { background: #a1260d; border-color: #c4321a; color: #fff; font-weight: 600; }
   .optRow { display: flex; gap: 6px; align-items: stretch; margin-bottom: 6px; }
   .optRow .opt { margin-bottom: 0; flex: 1; min-width: 0; }
   .paramBtn { flex: none; padding: 0 12px; font-size: 13px; }
@@ -122,6 +129,8 @@
   .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #ddd; transition: left .15s; }
   .switch.on { background: #0e639c; }
   .switch.on::after { left: 18px; }
+  .sub .add { color: #73c991; }
+  .sub .del { color: #f14c4c; }
   .pSec { font-size: 12px; color: #999; margin: 10px 4px 6px; }
   .pRow { display: flex; flex-wrap: wrap; gap: 6px; }
   .pRow button { padding: 8px 12px; font-size: 13.5px; }
@@ -218,11 +227,14 @@
   <div id="chatTools">
     <button id="pickMode" hidden></button>
     <button id="pickModel" hidden></button>
+    <button id="changes" hidden></button>
     <button id="pickHistory">历史</button>
     <button id="newChat">＋ 新建</button>
   </div>
   <div class="row">
     <textarea id="text" rows="1" placeholder="发给 Cursor Agent…" enterkeyhint="send"></textarea>
+    <button id="img" title="附加图片" aria-label="附加图片"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/></svg></button>
+    <input id="imgFile" type="file" accept="image/*" hidden>
     <button id="mic" title="语音输入" aria-label="语音输入"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
     <button id="send">发送</button>
   </div>
@@ -541,6 +553,7 @@ function connect() {
     }
     else if (m.t === 'menu') showMenu(m.kind, m.items, m.max);
     else if (m.t === 'params') showParams(m);
+    else if (m.t === 'changes') showChanges(m);
     else if (m.t === 'file') showFile(m);
     else if (m.t === 'status') status(m.msg, m.ok);
   };
@@ -559,7 +572,22 @@ function closeSheet() {
   $('shade').classList.remove('open');
   $('sheet').classList.remove('open');
 }
-$('shade').onclick = closeSheet;
+$('shade').onclick = () => { closeSheet(); askDone?.(false); };
+
+// Confirmation for anything that interrupts the Agent or throws work away; resolves false if dismissed.
+let askDone = null;
+function ask(question, ok = '确定') {
+  askDone?.(false);
+  return new Promise(resolve => {
+    askDone = v => { askDone = null; resolve(v); };
+    openSheet('ask', `<h3 class="askQ">${esc(question)}</h3><div class="askBtns">`
+      + `<button id="askNo">取消</button><button id="askOk" class="danger">${esc(ok)}</button></div>`);
+    $('askOk').onclick = () => { closeSheet(); askDone?.(true); };
+    $('askNo').onclick = () => { closeSheet(); askDone?.(false); };
+  });
+}
+// Buttons on Cursor's own cards that stop, reject or discard work.
+const RISKY = /^(stop|reject|deny|undo|discard|revert|cancel|delete|remove|停止|拒绝|撤销|丢弃|取消|删除)/i;
 
 const KIND_TAG = { agents: 'Agents', ssh: 'SSH', local: '本地' };
 
@@ -591,6 +619,18 @@ function showMenu(kind, items, max) {
     const pick = `<button class="opt ${it.checked ? 'cur' : ''}" data-kind="${kind}" data-label="${esc(it.label)}"><span class="lbl">${esc(it.label)}</span></button>`;
     return it.params ? `<div class="optRow">${pick}<button class="paramBtn" data-params="${esc(it.id)}" data-plabel="${esc(it.label)}">参数</button></div>` : pick;
   }).join(''));
+}
+
+function showChanges(m) {
+  status('');
+  if (!m.files.length) { if (sheetKind === 'changes') closeSheet(); return status('没有待处理的改动'); }
+  openSheet('changes', `<h3>Agent 改动的文件（${m.files.length}）</h3>`
+    + (m.actions.length ? `<div class="pRow" style="margin-bottom:10px">${m.actions.map(a => `<button data-chbar="${esc(a)}">${esc(a)}</button>`).join('')}</div>` : '')
+    + m.files.map((f, i) => `<div class="optRow"><button class="opt" data-chopen="${esc(f.name)}"><span class="lbl">${esc(f.name)}`
+      + `<span class="sub"><span class="add">${esc(f.add)}</span> <span class="del">${esc(f.del)}</span></span></span></button>`
+      + `<button class="paramBtn" data-ch="${i}" data-name="${esc(f.name)}" data-act2="keep">保留</button>`
+      + `<button class="paramBtn" data-ch="${i}" data-name="${esc(f.name)}" data-act2="undo">撤销</button></div>`).join('')
+    + '<div class="hint">点文件名查看内容。「保留」接受这个文件的改动，「撤销」把它恢复成改动前的样子。</div>');
 }
 
 function showParams(m) {
@@ -640,6 +680,7 @@ function showMainMenu() {
     ${inApp ? '<button class="opt" data-act="changeUrl"><span class="lbl">更换 App 地址</span></button>'
       : standalone() ? '' : '<button class="opt" data-act="install"><span class="lbl">安装到手机桌面（像 App 一样打开）</span></button>'}
     <button class="opt" data-act="reconnect"><span class="lbl">重新连接</span></button>
+    <button class="opt" data-act="voice"><span class="lbl">语音按钮<span class="sub">输入法键盘自带麦克风的话用不着</span></span><span class="switch ${store.get('voice') === 'on' ? 'on' : ''}"></span></button>
     <button class="opt" data-act="lang"><span class="lbl">语言 / Language</span><span class="tag">${I18N.lang === 'en' ? 'English' : '中文'}</span></button>
     <button class="opt" data-act="devices"><span class="lbl">已配对设备</span></button>
     <button class="opt" data-act="logout"><span class="lbl">取消本机配对</span></button>
@@ -779,6 +820,18 @@ $('sheet').addEventListener('click', async e => {
   if (!b) return;
   if (b.dataset.win) { closeSheet(); return send({ t: 'attach', id: b.dataset.win }); }
   if (b.dataset.kind) { closeSheet(); status('切换中…'); return send({ t: 'pickMenu', kind: b.dataset.kind, label: b.dataset.label }); }
+  if (b.dataset.chopen) { closeSheet(); return openFile(b.dataset.chopen); }
+  if (b.dataset.ch) {
+    const undo = b.dataset.act2 === 'undo';
+    if (undo && !await ask(`撤销「${b.dataset.name}」的改动？\n文件会恢复成 Agent 改之前的样子。`, '撤销')) return send({ t: 'changes' });
+    status(undo ? '正在撤销…' : '正在保留…');
+    return send({ t: 'change', i: Number(b.dataset.ch), name: b.dataset.name, act: b.dataset.act2 });
+  }
+  if (b.dataset.chbar) {
+    if (RISKY.test(b.dataset.chbar) && !await ask(`确定要点「${b.dataset.chbar}」吗？`, b.dataset.chbar)) return send({ t: 'changes' });
+    status('处理中…');
+    return send({ t: 'change', i: 0, name: b.dataset.chbar, act: 'bar' });
+  }
   if ('max' in b.dataset) { status('切换 MAX Mode…'); return send({ t: 'toggleMax' }); }
   if (b.dataset.params) { status('读取模型参数…'); return send({ t: 'params', model: b.dataset.params, label: b.dataset.plabel }); }
   if (b.dataset.section) { status('设置中…'); return send({ t: 'pickParam', model: b.dataset.model, label: b.dataset.plabel, section: b.dataset.section, value: b.dataset.value }); }
@@ -807,15 +860,19 @@ $('sheet').addEventListener('click', async e => {
     + `<button class="opt ${I18N.lang === 'zh' ? 'cur' : ''}" data-act="setLang" data-v="zh"><span class="lbl">中文</span></button>`
     + `<button class="opt ${I18N.lang === 'en' ? 'cur' : ''}" data-act="setLang" data-v="en"><span class="lbl">English</span></button>`);
   else if (act === 'setLang') I18N.set(b.dataset.v);
+  else if (act === 'voice') {
+    store.set('voice', store.get('voice') === 'on' ? null : 'on');
+    document.body.classList.toggle('voice', store.get('voice') === 'on');
+    b.querySelector('.switch').classList.toggle('on', store.get('voice') === 'on');
+  }
   else if (act === 'devices') showDevices();
   else if (b.dataset.remove) {
-    if (!confirm(`移除「${b.dataset.name}」？它会立即断开，要重新配对才能再用。`)) return;
+    if (!await ask(`移除「${b.dataset.name}」？它会立即断开，要重新配对才能再用。`, '移除')) return showDevices();
     await post('/api/devices/remove', { id: b.dataset.remove }).catch(() => {});
     showDevices();
   }
   else if (act === 'logout') {
-    if (!confirm('取消本机配对？之后要在电脑上重新运行 npm run pair 才能再用。')) return;
-    closeSheet();
+    if (!await ask('取消本机配对？之后要在电脑上重新运行 npm run pair 才能再用。', '取消配对')) return;
     await post('/api/logout').catch(() => {});
     store.set('token', null); store.set('key', null);
     authed = false; ws?.close();
@@ -872,6 +929,8 @@ function renderChat(chat) {
   $('pickModel').hidden = !chat?.model;
   if (chat?.mode) $('pickMode').textContent = chat.mode + ' ▾';
   if (chat?.model) $('pickModel').textContent = chat.model + ' ▾';
+  $('changes').hidden = !chat?.changed;
+  if (chat?.changed) $('changes').textContent = `改动 ${chat.changed} 个文件`;
   if (!chat) { itemsEl.replaceChildren(); renderQueue(false, []); return; }
   const stick = nearBottom();
   // Anchor on the first visible item so loading older messages doesn't jump.
@@ -906,13 +965,14 @@ function renderChat(chat) {
   updateToBottom();
 }
 
+let subsOpen = false;
 function renderQueue(busy, queued, subs = [], readonly = false) {
   const bar = $('queueBar');
   let html = '';
   if (readonly) html += `<div class="run sub"><span>正在查看子 Agent 的对话（只读）</span><button data-main>返回主对话</button></div>`;
   if (subs.length && !readonly) {
-    html += `<div class="qh">子 Agent 运行中 ${subs.length} 个</div>`;
-    html += subs.map(n => `<div class="q"><span class="qt sa">${esc(n)}</span>`
+    html += `<button class="qh fold" data-fold>${subsOpen ? '▾' : '▸'} <span>子 Agent 运行中 ${subs.length} 个</span></button>`;
+    if (subsOpen) html += subs.map(n => `<div class="q"><span class="qt sa">${esc(n)}</span>`
       + `<button data-sub="${esc(n)}" data-part="open">查看</button><button data-sub="${esc(n)}" data-part="stop">停止</button></div>`).join('');
   }
   if (busy && !readonly) html += `<div class="run"><i></i><span>Agent 正在运行${queued.length ? '，下面的消息会在这一轮结束后依次发送' : '，现在发的消息会先排队'}</span><button data-stop>停止</button></div>`;
@@ -943,18 +1003,25 @@ function editQueued(id) {
   };
 }
 
-$('queueBar').onclick = e => {
+$('queueBar').onclick = async e => {
   const b = e.target.closest('button');
   if (!b) return;
-  if ('stop' in b.dataset) { send({ t: 'stop' }); status('已停止 Agent'); return; }
+  if ('fold' in b.dataset) { subsOpen = !subsOpen; return renderQueue(lastChat?.busy, lastChat?.queued || [], lastChat?.subagents || [], lastChat?.readonly); }
+  if ('stop' in b.dataset) {
+    if (!await ask('停止 Agent？\n它这一轮正在做的事会中断。', '停止')) return;
+    send({ t: 'stop' }); status('已停止 Agent'); return;
+  }
   if ('main' in b.dataset) { send({ t: 'mainChat' }); status('返回主对话…'); return; }
   if (b.dataset.sub) {
+    if (b.dataset.part === 'stop' && !await ask(`停止子 Agent「${b.dataset.sub}」？\n它做到一半的工作会中断。`, '停止')) return;
     send({ t: 'subagent', name: b.dataset.sub, part: b.dataset.part });
     status(b.dataset.part === 'stop' ? '已停止子 Agent' : '正在打开子 Agent…');
     if (b.dataset.part === 'open') list.scrollTop = list.scrollHeight;
     return;
   }
   if (b.dataset.a === 'edit') return editQueued(b.dataset.q);
+  if (b.dataset.a === 'send' && !await ask('立即发送这条消息？\nAgent 当前这一轮会被打断。', '立即发送')) return;
+  if (b.dataset.a === 'remove' && !await ask('删除这条排队消息？', '删除')) return;
   send({ t: 'queue', id: b.dataset.q, action: b.dataset.a });
   status(b.dataset.a === 'send' ? '已立即发送这条排队消息' : '已删除这条排队消息');
 };
@@ -966,17 +1033,19 @@ list.addEventListener('scroll', updateToBottom);
 $('toBottom').onclick = () => { list.scrollTop = list.scrollHeight; };
 $('older').onclick = () => send({ t: 'scrollChat', dy: -900 });
 
-document.addEventListener('click', e => {
+document.addEventListener('click', async e => {
   const b = e.target.closest('button[data-item]');
   const f = !b && e.target.closest('#items [data-file]');
   if (f) return openFile(f.dataset.file);
   if (!b) return;
+  if (RISKY.test(b.textContent.trim()) && !await ask(`确定要点「${b.textContent.trim()}」吗？`, b.textContent.trim())) return;
   send({ t: 'click', item: b.dataset.item, n: Number(b.dataset.n) });
   status('已点击：' + b.textContent);
 });
 
 $('pickMode').onclick = () => { status('读取模式列表…'); send({ t: 'openMenu', kind: 'mode' }); };
 $('pickModel').onclick = () => { status('读取模型列表…'); send({ t: 'openMenu', kind: 'model' }); };
+$('changes').onclick = () => { status('读取改动的文件…'); send({ t: 'changes' }); };
 $('pickHistory').onclick = () => { status('读取历史对话…'); send({ t: 'openMenu', kind: 'history' }); };
 $('newChat').onclick = () => { send({ t: 'newChat' }); status('已新建对话'); };
 
@@ -1162,6 +1231,7 @@ $('send').onclick = () => {
 
 /* ---------- voice input ---------- */
 // Android WebView has no Web Speech API, so the app uses the system recognizer through the bridge instead.
+document.body.classList.toggle('voice', store.get('voice') === 'on');
 const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 let recognizer = null;
 const addVoiceText = s => {
@@ -1169,6 +1239,37 @@ const addVoiceText = s => {
   autosize();
 };
 window.onVoice = s => { $('mic').classList.remove('on'); s ? (addVoiceText(s), status('')) : status('没听清，再试一次', false); };
+// Photos from phone cameras are several MB; shrink to something the model can read and the relay accepts.
+async function shrinkImage(file) {
+  if (/^image\/(png|jpeg|gif|webp)$/.test(file.type) && file.size < 600e3) return file;
+  const bmp = await createImageBitmap(file);
+  let side = 1600, q = 0.85, blob;
+  do {
+    const k = Math.min(1, side / Math.max(bmp.width, bmp.height));
+    const c = document.createElement('canvas');
+    c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    blob = await new Promise(r => c.toBlob(r, 'image/jpeg', q));
+    side *= 0.75; q -= 0.1;
+  } while (blob.size > 1.5e6 && q > 0.4);
+  return new File([blob], file.name.replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' });
+}
+
+$('img').onclick = () => $('imgFile').click();
+$('imgFile').onchange = async () => {
+  const file = $('imgFile').files[0];
+  $('imgFile').value = '';
+  if (!file) return;
+  status('正在处理图片…');
+  try {
+    const img = await shrinkImage(file);
+    const url = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(img); });
+    send({ t: 'image', data: url.slice(url.indexOf(',') + 1), name: img.name, type: img.type });
+  } catch {
+    status('读不了这张图片，换一张试试', false);
+  }
+};
+
 $('mic').onclick = () => {
   if (window.CursorRemoteApp?.voice) {
     if (!window.CursorRemoteApp.voice(I18N.speech)) return status('手机上没有语音识别服务，可以用输入法键盘上的麦克风', false);

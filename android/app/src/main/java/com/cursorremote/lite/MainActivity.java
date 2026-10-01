@@ -17,6 +17,7 @@ import android.provider.Settings;
 import android.speech.RecognizerIntent;
 import android.widget.Toast;
 import android.webkit.JavascriptInterface;
+import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
@@ -35,7 +36,9 @@ public class MainActivity extends Activity {
     private static final String APK_MIME = "application/vnd.android.package-archive";
     private static final String UPDATE_FILE = "CursorRemote-update.apk";
     private static final int VOICE = 7;
+    private static final int PICK = 8;
     private WebView web;
+    private ValueCallback<Uri[]> pickFile;
     private SharedPreferences prefs;
 
     private final BroadcastReceiver downloaded = new BroadcastReceiver() {
@@ -60,7 +63,20 @@ public class MainActivity extends Activity {
         s.setUserAgentString(s.getUserAgentString() + " CursorRemoteApp/" + BuildConfigVersion.name(this));
 
         web.addJavascriptInterface(new Bridge(), "CursorRemoteApp");
-        web.setWebChromeClient(new WebChromeClient());
+        web.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
+                if (pickFile != null) pickFile.onReceiveValue(null);
+                pickFile = callback;
+                try {
+                    startActivityForResult(params.createIntent(), PICK);
+                } catch (Exception e) {
+                    pickFile = null;
+                    return false;
+                }
+                return true;
+            }
+        });
         web.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
@@ -212,6 +228,11 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if (request == PICK) {
+            if (pickFile != null) pickFile.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(result, data));
+            pickFile = null;
+            return;
+        }
         if (request != VOICE) return;
         ArrayList<String> heard = result == RESULT_OK && data != null ? data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS) : null;
         voiceResult(heard == null || heard.isEmpty() ? "" : heard.get(0));

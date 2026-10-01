@@ -188,6 +188,20 @@ const FOCUS_COMPOSER = `(() => {
   return true;
 })()`;
 
+// Cursor accepts images pasted into the composer; a synthetic paste event carrying a File works the same way.
+const pasteImage = (b64, name, type) => `(async () => {
+  if (!${FOCUS_COMPOSER}) return null;
+  const ed = document.activeElement.closest('[contenteditable="true"]') || document.activeElement;
+  const pills = () => document.querySelectorAll('.context-pill-image').length;
+  const before = pills();
+  const bin = Uint8Array.from(atob(${JSON.stringify(b64)}), c => c.charCodeAt(0));
+  const dt = new DataTransfer();
+  dt.items.add(new File([bin], ${JSON.stringify(name)}, { type: ${JSON.stringify(type)} }));
+  ed.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+  for (let i = 0; i < 20 && pills() <= before; i++) await new Promise(r => setTimeout(r, 100));
+  return pills() > before;
+})()`;
+
 // Runs inside Cursor's renderer (injected via toString). Emits only whitelisted tags with escaped text, never raw DOM HTML.
 function pageHelpers() {
   const vis = e => { const b = e.getBoundingClientRect(); return b.width > 0 && b.height > 0; };
@@ -301,6 +315,39 @@ function pageHelpers() {
   };
   const hasComposer = () => [...document.querySelectorAll('.aislash-editor-input[contenteditable="true"], .ui-prompt-input-editor__input[contenteditable="true"]')].some(vis);
 
+  // Files changed by the Agent: the "N Files" toggle above the composer expands a list with per-file undo / keep.
+  const filesToggle = () => [...document.querySelectorAll('span.cursor-pointer')].find(e => vis(e) && /^\d+ Files?$/.test(e.innerText.trim().replace(/\s+/g, ' ')));
+  const changedCount = () => parseInt(filesToggle()?.innerText || '0', 10) || 0;
+  const changedRows = () => [...document.querySelectorAll('.composer-file-list-item')].filter(vis);
+  const changedFiles = () => changedRows().map(r => {
+    const stat = [...r.querySelectorAll('.tabular-nums span')].map(s => s.innerText.trim());
+    return {
+      name: r.querySelector('span[style*="nowrap"]')?.innerText.trim() || r.innerText.trim().split('\n')[0],
+      add: stat.find(s => s.startsWith('+')) || '',
+      del: stat.find(s => /^[-−]/.test(s)) || '',
+    };
+  });
+  const filesBar = () => {
+    let t = filesToggle();
+    while (t && !t.querySelector('[data-click-ready]')) t = t.parentElement;
+    return t;
+  };
+  // Bar-level actions besides Stop (handled elsewhere) and Review (desktop-only diff view), e.g. Keep All / Undo All.
+  const fileBarButtons = () => [...(filesBar()?.querySelectorAll('[data-click-ready]') || [])].filter(vis)
+    .map(e => ({ el: e, label: (e.querySelector('.truncate') || e).innerText.trim() }))
+    .filter(x => x.label && !/^(stop|review)$/i.test(x.label));
+  const filesState = () => ({ files: changedFiles(), actions: fileBarButtons().map(x => x.label) });
+  const fileTarget = (i, name, act) => {
+    if (act === 'toggle') { const t = filesToggle(); return t ? center(t) : null; }
+    if (act === 'bar') return (b => b ? center(b.el) : null)(fileBarButtons().find(x => x.label === name));
+    const row = changedRows()[i];
+    if (!row || changedFiles()[i].name !== name) return null;
+    row.scrollIntoView({ block: 'nearest' });
+    if (act === 'row') return center(row);
+    const icon = row.querySelector(act === 'undo' ? '.codicon-x-two' : '.codicon-check-two');
+    return icon ? center(icon.closest('.anysphere-icon-button') || icon) : null;
+  };
+
   // Editing a queued message loads it into the main composer, which is tagged with the item id until saved.
   const focusQueueEdit = id => {
     const bar = [...document.querySelectorAll('[data-editing-queue-item-id]')].find(e => vis(e) && e.dataset.editingQueueItemId === id);
@@ -342,6 +389,7 @@ function pageHelpers() {
       busy: isBusy(),
       queued: queued(),
       subagents: subagents(),
+      changed: changedCount(),
       readonly: !hasComposer(),
       mode: modeEl ? modeEl.innerText.trim() || modeEl.dataset.mode : null,
       model: modelEl ? modelEl.innerText.trim() : null,
@@ -469,7 +517,7 @@ function pageHelpers() {
   };
 
   return { extract, locate, panelRect, control, menuItems, menuItem, quickOpenRows, agentState, queueTarget, stopTarget, focusQueueEdit,
-    menuOpen, maxToggle, modelTarget, modelParams, paramTarget, subTarget, activeChatTab, tabTarget, hasComposer };
+    menuOpen, maxToggle, modelTarget, modelParams, paramTarget, subTarget, activeChatTab, tabTarget, hasComposer, filesState, fileTarget };
 }
 
 const helpersCall = call => `(${pageHelpers.toString()})().${call}`;
@@ -589,6 +637,52 @@ class Session {
     }
     await this.tapCss(pos.x, pos.y);
     setTimeout(() => this.pollChat().catch(() => {}), 500);
+  }
+
+  // Opens Cursor's changed-files list if needed, runs fn, then puts the list back the way it was.
+  async withFiles(fn) {
+    const state = () => this.cdp.evaluate(helpersCall('filesState()'));
+    let s = await state();
+    const opened = !s.files.length;
+    if (opened) {
+      const t = await this.cdp.evaluate(helpersCall('fileTarget(0, "", "toggle")'));
+      if (!t) return fn(s);
+      await this.tapCss(t.x, t.y);
+      for (let i = 0; i < 8 && !s.files.length; i++) {
+        await new Promise(r => setTimeout(r, 120));
+        s = await state();
+      }
+    }
+    try {
+      return await fn(s);
+    } finally {
+      const t = opened && await this.cdp.evaluate(helpersCall('fileTarget(0, "", "toggle")'));
+      if (t && (await state()).files.length) await this.tapCss(t.x, t.y);
+    }
+  }
+
+  async listChanges() {
+    const s = await this.withFiles(async s => s);
+    this.emit({ t: 'changes', ...s });
+  }
+
+  async changeAction(i, name, act) {
+    if (!['keep', 'undo', 'bar'].includes(act)) throw new Error('不支持的操作');
+    await this.withFiles(async () => {
+      const call = a => helpersCall(`fileTarget(${Number(i) || 0}, ${JSON.stringify(String(name))}, ${JSON.stringify(a)})`);
+      if (act !== 'bar') {
+        const row = await this.cdp.evaluate(call('row'));
+        if (!row) throw new Error('文件列表已经变了，请重新打开');
+        await this.cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: row.x, y: row.y });
+        await new Promise(r => setTimeout(r, 120));
+      }
+      const pos = await this.cdp.evaluate(call(act));
+      if (!pos) throw new Error('没找到这个按钮（可能 Cursor 版本不同）');
+      await this.tapCss(pos.x, pos.y);
+      await new Promise(r => setTimeout(r, 400));
+    });
+    await this.listChanges();
+    setTimeout(() => this.pollChat().catch(() => {}), 300);
   }
 
   async backToMain() {
@@ -940,6 +1034,14 @@ class Session {
     return Boolean(busy);
   }
 
+  async attachImage(data, name, type) {
+    if (!/^image\/(png|jpeg|gif|webp)$/.test(type) || typeof data !== 'string' || !/^[A-Za-z0-9+/=]+$/.test(data)) throw new Error('只支持 PNG / JPEG / GIF / WebP 图片');
+    const ok = await this.cdp.evaluate(pasteImage(data, String(name || 'image').replace(/[^\w.\-]/g, '_').slice(0, 60), type));
+    if (ok === null) throw new Error('没找到可见的聊天输入框：先在画面里打开 Agent 面板（或点「打开聊天」）');
+    if (!ok) throw new Error('Cursor 没有接收这张图片（当前模型可能不支持图片）');
+    this.emit({ t: 'status', ok: true, msg: '图片已附加到 Cursor 输入框，写好文字后点发送' });
+  }
+
   async handle(msg) {
     if (msg.t === 'windows') return this.emit({ t: 'windows', list: (await listWindows()).map(({ id, title, kind }) => ({ id, title, kind })), current: this.targetId });
     if (msg.t === 'attach') return this.attach(msg.id);
@@ -961,6 +1063,9 @@ class Session {
       case 'stop': return this.stopAgent();
       case 'subagent': return this.subagentAction(msg.name, msg.part === 'stop' ? 'stop' : 'open');
       case 'mainChat': return this.backToMain();
+      case 'image': return this.attachImage(msg.data, msg.name, msg.type);
+      case 'changes': return this.listChanges();
+      case 'change': return this.changeAction(msg.i, msg.name, msg.act);
       case 'scrollChat': return this.scrollChat(Number(msg.dy) || 0);
       case 'tap': return this.tap(msg.x, msg.y, msg.button);
       case 'wheel': return this.wheel(msg.x, msg.y, msg.dx || 0, msg.dy || 0);
@@ -1124,7 +1229,7 @@ const server = http.createServer(async (req, res) => {
   res.writeHead(404, SECURITY_HEADERS).end('not found');
 });
 
-const wss = new WebSocketServer({ noServer: true, maxPayload: 1 << 20 });
+const wss = new WebSocketServer({ noServer: true, maxPayload: 4 << 20 });
 
 server.on('upgrade', (req, socket, head) => {
   const url = new URL(req.url, 'http://x');
