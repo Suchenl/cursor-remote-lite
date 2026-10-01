@@ -2,7 +2,7 @@
 
 # Cursor Remote Lite
 
-Use the Cursor on your computer from your phone: read Agent replies, send messages, tap "Run / Accept", preview files, and switch windows / modes / models.
+**Leave your laptop behind and keep working.** Your computer stays on at home or at the office; with just your phone you keep using the Cursor on it: give the Agent tasks, check its progress, answer its questions, approve commands, and review the files it changed, in local and SSH remote windows alike.
 Free, open source and self-hosted. No server needed, and your phone doesn't have to be on the same Wi-Fi as your computer.
 
 > Inspired by [len5ky/CursorRemote](https://github.com/len5ky/CursorRemote); this is a free version written from scratch.
@@ -21,14 +21,29 @@ Free, open source and self-hosted. No server needed, and your phone doesn't have
 
 ## Why I built this
 
-An Agent run can easily take ten or twenty minutes, and it often stops midway waiting for you to tap "Run" or answer a question. Once you step away from the computer, the task just sits there.
-What I wanted was simple: **see what's happening in Cursor on my computer from my phone, and keep working from there**. Without moving code to the cloud, without paying for another subscription, and working on Android and on networks in mainland China.
+### A typical day
 
-Existing options all fall a little short:
+Before leaving in the morning, you ask Cursor's Agent to fix a bug in a project that lives on your company's GPU server (an SSH remote window). Then you commute, sit in meetings, grab lunch, or travel for two days, and the laptop stays behind.
 
-- **Cursor's official mobile app** (Cursor for iOS + Remote Control): iPhone / iPad only (iOS 26+), with no native Android app yet; requires a paid plan; Remote Control only works with the Agents window, and the Agent's reasoning loop moves to Cursor's cloud. Conversations in regular editor windows or SSH remote windows can't be controlled.
+Meanwhile the Agent finishes a turn and waits for you to check it; stops to wait for you to tap "Run"; or asks you a question like "When a session expires, should we return 401 or renew it?". You also think of the next thing you want it to do.
+
+**What you need isn't "a quick remote peek". It's being able to keep working without your computer**: give tasks, answer questions, approve commands, see which files changed, and decide what to keep or undo. And the work has to happen in your own environment: your local code and data, your configured SSH servers, your installed dependencies.
+
+### What existing options can do, and where they fall short
+
+- **Cursor's official mobile app** (Cursor for iOS + Remote Control): iPhone / iPad only (iOS 26+), with no native Android app yet; requires a paid plan; Remote Control only works with the Agents window, and the Agent's reasoning loop moves to Cursor's cloud. Conversations already running in regular editor windows or SSH remote windows can't be controlled.
 - **[len5ky/CursorRemote](https://github.com/len5ky/CursorRemote)**: same idea (controls the local Cursor through its debugging port), but requires a $7.99/month license, and the code is source-available rather than open source; for access from outside your network you have to set up Tailscale or a Telegram bot yourself.
-- **Remote desktop** (Sunlogin, ToDesk, RustDesk, Chrome Remote Desktop): can control everything, but reading Cursor's chat panel and hitting tiny buttons on a small phone screen is painful, and it uses a lot of data.
+- **Remote desktop** (Sunlogin, ToDesk, RustDesk, Chrome Remote Desktop): can control everything, but it means driving a shrunken desktop on your phone; reading Cursor's chat panel, hitting tiny buttons and typing are all painful, it uses a lot of data, and nothing tells you when the Agent finishes or needs you.
+
+### What this project does
+
+A tiny relay on your computer drives the real Cursor running there, and your phone gets an interface designed for phones:
+
+- Read the Agent conversation like a chat app and type messages directly; messages sent while it's busy are queued automatically.
+- When the Agent waits for you to tap "Run" or asks you a question, your phone gets a notification and you answer right there.
+- See which files changed and how many lines, keep or undo each one; switch to a live screen view when needed.
+- Every window works: local, SSH remote, Agents; switch mode, model and reasoning effort anytime.
+- Your code and conversations stay on your own computer and are never handed to a cloud Agent; your phone reaches it in real time through a Cloudflare tunnel (HTTPS). Works on Android and iPhone, including on networks in mainland China.
 
 ### Why support both Android and iPhone
 
@@ -74,6 +89,7 @@ So this project provides both: an Android app that installs without Google servi
 - **Multiple windows**: tap the window name in the top-left to switch windows, including SSH remote windows and the Agents window.
 - **Modes / models / chat history**: switch between Agent / Plan / Ask, change models, open past conversations and start new ones, right from your phone.
 - **Model parameters**: tap "Parameters" in the model list to adjust context length (e.g. 300K / 1M), reasoning effort (Low → Max) and the Fast toggle; there's also a MAX Mode toggle at the top. Which options are available depends on what Cursor offers for that model.
+- **Answer the Agent's questions**: when the Agent asks you something through its question prompt (multiple choice, several questions, or a free-text answer), a "The Agent is asking you" card appears on your phone; tap an option or write your own answer and submit, or skip. The notification shows the question itself.
 - **Queued messages**: messages sent while the Agent is running go into Cursor's queue. Your phone shows "Agent is running" plus each queued message, which you can edit, send immediately (interrupting the current turn) or delete. You can also stop the Agent with one tap.
 - **Sub-agents**: while sub-agents spawned by the Agent are running, your phone shows "Subagents running: N" (collapsed by default; tap to expand the list). Tap "View" to see a sub-agent's own conversation (read-only), or stop it individually.
 - **Changed files**: after the Agent edits files, "N files changed ›" appears above the input box. Tap it to see lines added / removed per file, tap a file name to view it, and Keep or Undo each file, just like Keep / Undo on the desktop.
