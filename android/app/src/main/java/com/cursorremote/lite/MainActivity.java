@@ -7,10 +7,13 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.PowerManager;
+import android.provider.Settings;
 import android.widget.Toast;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
@@ -19,6 +22,8 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+
+import org.json.JSONObject;
 
 import java.io.File;
 
@@ -75,9 +80,25 @@ public class MainActivity extends Activity {
         else registerReceiver(downloaded, done);
 
         if (!openPairLink(getIntent())) {
+            String win = getIntent().getStringExtra("win");
+            if (win != null) prefs.edit().putString("openWin", win).apply();
             if (state != null) web.restoreState(state);
             else load();
         }
+        NotifyService.start(this);
+    }
+
+    // WebView's onPause/onResume flip document.visibilityState, which tells the relay whether to notify.
+    @Override
+    protected void onPause() {
+        super.onPause();
+        web.onPause();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        web.onResume();
     }
 
     @Override
@@ -120,7 +141,30 @@ public class MainActivity extends Activity {
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
-        openPairLink(intent);
+        if (openPairLink(intent)) return;
+        String win = intent.getStringExtra("win");
+        if (win != null) web.evaluateJavascript("window.openWin && openWin(" + JSONObject.quote(win) + ")", null);
+    }
+
+    private void enableNotify(String config) {
+        prefs.edit().putString(NotifyService.PREF, config).apply();
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, 1);
+        }
+        // Without this, stock Android may stop the listener after the phone has been idle for a while.
+        PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+        if (!pm.isIgnoringBatteryOptimizations(getPackageName()) && !prefs.getBoolean("askedBattery", false)) {
+            prefs.edit().putBoolean("askedBattery", true).apply();
+            try {
+                startActivity(new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + getPackageName())));
+            } catch (Exception ignored) {}
+        }
+        NotifyService.start(this);
+    }
+
+    private void disableNotify() {
+        prefs.edit().remove(NotifyService.PREF).apply();
+        stopService(new Intent(this, NotifyService.class));
     }
 
     // cursorremote://pair?app=<https app address>&d=<url key>.<one-time code>, handed over by the web app in a browser.
@@ -185,6 +229,28 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void changeUrl() {
             runOnUiThread(() -> web.loadUrl(SETUP + "?change=1"));
+        }
+
+        // config: {"app","key","token"} from the paired page, or "" to turn notifications off.
+        @JavascriptInterface
+        public void setNotify(String config) {
+            runOnUiThread(() -> {
+                if (config == null || config.isEmpty()) disableNotify();
+                else enableNotify(config);
+            });
+        }
+
+        @JavascriptInterface
+        public boolean notifyEnabled() {
+            return NotifyService.enabled(MainActivity.this);
+        }
+
+        // A notification tapped while the app was closed: the page asks for its window once it has connected.
+        @JavascriptInterface
+        public String takeOpenWin() {
+            String win = prefs.getString("openWin", "");
+            prefs.edit().remove("openWin").apply();
+            return win;
         }
 
         @JavascriptInterface

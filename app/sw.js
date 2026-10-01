@@ -1,5 +1,5 @@
 // Caches the app shell so the installed app opens instantly; live data (url.json, relay) always goes to the network.
-const CACHE = 'cursor-remote-v1';
+const CACHE = 'cursor-remote-v2';
 const SHELL = ['./', 'index.html', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', e => {
@@ -23,4 +23,33 @@ self.addEventListener('fetch', e => {
       return res;
     })
     .catch(() => caches.match(e.request)));
+});
+
+// iOS revokes push permission if a push arrives without a visible notification, so every push shows one.
+function showPush(text) {
+  let d = {};
+  try { d = JSON.parse(text); } catch {}
+  return self.registration.showNotification(d.title || 'Cursor Remote', {
+    body: d.body || '',
+    tag: d.win || 'cursor-remote',
+    renotify: true,
+    icon: 'icon-192.png',
+    badge: 'icon-192.png',
+    data: { win: d.win || '' },
+  });
+}
+self.addEventListener('push', e => e.waitUntil(showPush(e.data ? e.data.text() : '')));
+
+// Tapping a notification opens the app on the window it came from.
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const win = e.notification.data?.win || '';
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+    const client = list[0];
+    if (client) {
+      client.postMessage({ openWin: win });
+      return client.focus();
+    }
+    return self.clients.openWindow('./' + (win ? '#win=' + encodeURIComponent(win) : ''));
+  }));
 });

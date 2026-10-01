@@ -12,6 +12,7 @@ import {
   DATA_DIR, encryptUrl, createPairing, pairingValid, consumePairing, listDevices, addDevice, findDevice, updateDevice,
   removeDevice, totpConfig, verifyTotp, needsTotp, saveState, appBase,
 } from './auth.mjs';
+import { pushPublicKey, openEventStream, closeEventStreams, addViewer, removeViewer, deliver, startWatcher } from './notify.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 3939);
@@ -336,6 +337,25 @@ function pageHelpers() {
     return [r.x, r.y, r.width, r.height].map(Math.round);
   };
 
+  // Cheap per-window check for notifications: is the Agent running, and is it waiting on a button?
+  const WAIT = /^(run|allow|accept|approve|continue|yes\b|运行|允许|接受|批准|继续)/i;
+  const agentState = () => {
+    const panel = findPanel();
+    if (!panel) return null;
+    const busy = [...document.querySelectorAll('.composer-button-area .codicon-debug-stop, .send-with-mode .codicon-debug-stop')].some(vis);
+    const items = topItems(panel);
+    let waiting = null, waitingText = '';
+    for (const el of items.slice(-3)) {
+      const labels = buttonsIn(el, false).map(x => x.label).filter(l => WAIT.test(l));
+      if (labels.length) { waiting = `${el.dataset.flatIndex}:${labels.join('/')}`; waitingText = summary(el); }
+    }
+    const global = buttonsIn(panel, true).filter(x => !x.el.closest('[data-flat-index]') && WAIT.test(x.label)).map(x => x.label);
+    if (!waiting && global.length) { waiting = `g:${global.join('/')}`; waitingText = global.join(' / '); }
+    const lastReply = [...items].reverse().find(el => el.matches('[data-message-kind="assistant"]') || el.querySelector('[data-message-kind="assistant"]'));
+    const last = lastReply ? lastReply.innerText.trim().replace(/\s+/g, ' ').slice(0, 160) : '';
+    return { busy, waiting, waitingText, last };
+  };
+
   const quickOpenRows = () => {
     const w = document.querySelector('.quick-input-widget');
     if (!w || !vis(w)) return null;
@@ -345,14 +365,17 @@ function pageHelpers() {
     }));
   };
 
-  return { extract, locate, panelRect, control, menuItems, menuItem, quickOpenRows };
+  return { extract, locate, panelRect, control, menuItems, menuItem, quickOpenRows, agentState };
 }
 
 const helpersCall = call => `(${pageHelpers.toString()})().${call}`;
 
 class Session {
-  constructor(client) {
+  constructor(client, deviceId) {
     this.client = client;
+    this.deviceId = deviceId;
+    // The phone reports when the app goes to the background; notifications skip the window it is looking at.
+    this.visible = true;
     this.cdp = null;
     this.viewport = { w: 1000, h: 800 };
     this.screencast = { format: 'jpeg', quality: 60, maxWidth: 1280, maxHeight: 2400 };
@@ -686,6 +709,7 @@ class Session {
     if (msg.t === 'windows') return this.emit({ t: 'windows', list: (await listWindows()).map(({ id, title, kind }) => ({ id, title, kind })), current: this.targetId });
     if (msg.t === 'attach') return this.attach(msg.id);
     if (msg.t === 'mode') return this.setMode(msg.mode);
+    if (msg.t === 'visible') { this.visible = Boolean(msg.v); return; }
     if (!this.cdp) throw new Error('尚未连接到 Cursor 窗口');
     switch (msg.t) {
       case 'openMenu': return this.openMenu(msg.kind);
@@ -813,12 +837,31 @@ async function handleApi(req, res, route) {
   if (route === '/api/devices/remove' && req.method === 'POST') {
     const { id } = await readJson(req);
     removeDevice(String(id));
+    closeEventStreams(String(id));
     console.log(`[unpair] 移除设备 ${id}（操作来自「${device.name}」）`);
     return json(req, res, 200, { ok: true });
   }
   if (route === '/api/logout' && req.method === 'POST') {
     removeDevice(device.id);
+    closeEventStreams(device.id);
     console.log(`[unpair] 设备「${device.name}」自己退出`);
+    return json(req, res, 200, { ok: true });
+  }
+
+  if (route === '/api/events') return openEventStream(req, res, device.id);
+  if (route === '/api/push/key') return json(req, res, 200, { key: pushPublicKey() });
+  if (route === '/api/push/subscribe' && req.method === 'POST') {
+    const { sub } = await readJson(req);
+    if (!/^https:\/\//.test(sub?.endpoint || '') || !sub.keys?.p256dh || !sub.keys?.auth) return json(req, res, 400, { error: '订阅信息无效' });
+    updateDevice(device.id, { push: { endpoint: sub.endpoint, keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth } } });
+    return json(req, res, 200, { ok: true });
+  }
+  if (route === '/api/push/unsubscribe' && req.method === 'POST') {
+    updateDevice(device.id, { push: null });
+    return json(req, res, 200, { ok: true });
+  }
+  if (route === '/api/push/test' && req.method === 'POST') {
+    await deliver({ kind: 'test', win: '', title: 'Cursor Remote', body: '测试通知：能看到这条，说明通知已经通了 ✅' }, device.id);
     return json(req, res, 200, { ok: true });
   }
   return json(req, res, 404, { error: 'not found' });
@@ -864,7 +907,8 @@ wss.on('connection', (ws, req) => {
         return ws.close(4001, 'unauthorized');
       }
       updateDevice(device.id, { lastSeen: Date.now() });
-      session = new Session(ws);
+      session = new Session(ws, device.id);
+      addViewer(session);
       ws.send(JSON.stringify({ t: 'auth', ok: true }));
       console.log(`[+] client ${clientIp(req)}`);
       return;
@@ -883,6 +927,7 @@ wss.on('connection', (ws, req) => {
   ws.on('close', () => {
     clearTimeout(authTimer);
     if (!session) return;
+    removeViewer(session);
     session.dispose();
     console.log(`[-] client ${clientIp(req)}`);
   });
@@ -999,6 +1044,11 @@ function startTunnel() {
 server.listen(PORT, TUNNEL ? '127.0.0.1' : HOST, async () => {
   console.log(`Cursor Remote Lite 已启动，端口 ${PORT}`);
   console.log(`已配对 ${listDevices().length} 台设备。添加新设备：npm run pair`);
+  startWatcher({
+    listWindows,
+    openCdp: async ws => { const c = new Cdp(ws); await c.connect(); return c; },
+    probe: helpersCall('agentState()'),
+  });
   try {
     const wins = await listWindows();
     console.log(`已连上 Cursor，${wins.length} 个窗口：${wins.map(w => w.title).join(' | ')}`);

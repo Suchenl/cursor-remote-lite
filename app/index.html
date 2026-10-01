@@ -325,6 +325,14 @@ function parsePair(text) {
 }
 let pending = parsePair(location.hash);
 if (pending) history.replaceState(null, '', location.pathname + location.search);
+// Opened from a notification: <app>#win=<window id>.
+{
+  const m = /[#&]win=([^&]+)/.exec(location.hash);
+  if (m) {
+    store.set('window', decodeURIComponent(m[1]));
+    history.replaceState(null, '', location.pathname + location.search);
+  }
+}
 window.addEventListener('hashchange', () => {
   const p = parsePair(location.hash);
   if (!p) return;
@@ -482,9 +490,13 @@ function connect() {
       status('已连接');
       send({ t: 'mode', mode });
       send({ t: 'windows' });
+      const fromNotice = window.CursorRemoteApp?.takeOpenWin?.();
+      if (fromNotice) store.set('window', fromNotice);
       send({ t: 'attach', id: store.get('window') || '' });
       sentWidth = 0;
       applyQuality();
+      send({ t: 'visible', v: document.visibilityState === 'visible' });
+      syncNotify();
       setTimeout(checkAppUpdate, 3000);
     }
     else if (m.t === 'chat') renderChat(m.chat);
@@ -572,10 +584,15 @@ function showDonate() {
 }
 
 function showMainMenu() {
+  const notifyItem = notifyOn
+    ? `<button class="opt" data-act="notifyOff"><span class="lbl">通知：已开启<span class="sub">Agent 完成或等你确认时提醒</span></span><span class="tag">关闭</span></button>
+       <button class="opt" data-act="notifyTest"><span class="lbl">发一条测试通知</span></button>`
+    : `<button class="opt" data-act="notifyOn"><span class="lbl">开启通知<span class="sub">Agent 完成或等你确认时提醒</span></span></button>`;
   const update = apkUpdate()
     ? `<button class="opt" data-act="appUpdate"><span class="lbl">更新安卓 App（v${esc(appVersion)} → v${esc(apkUpdate())}）</span><span class="tag">新</span></button>`
     : `<button class="opt" data-act="appUpdate"><span class="lbl">检查 App 更新（当前 v${esc(appVersion)}）</span></button>`;
   openSheet('main', `<h3>菜单</h3>
+    ${notifyItem}
     ${inApp && appVersion ? update : ''}
     ${inApp ? '<button class="opt" data-act="changeUrl"><span class="lbl">更换 App 地址</span></button>'
       : standalone() ? '' : '<button class="opt" data-act="install"><span class="lbl">安装到手机桌面（像 App 一样打开）</span></button>'}
@@ -628,6 +645,78 @@ function installAppUpdate() {
   else location.href = APK_RELEASE;
 }
 
+/* ---------- notifications ---------- */
+// Android app: its own background listener. Elsewhere: Web Push (iPhone only from the home-screen app).
+const nativeNotify = () => Boolean(window.CursorRemoteApp?.setNotify);
+const webPush = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+let notifyOn = false;
+
+const swReady = () => Promise.race([navigator.serviceWorker.ready, sleep(5000).then(() => { throw new Error('通知组件没有加载，请刷新后再试'); })]);
+const pushSub = async () => webPush() ? (await swReady()).pushManager.getSubscription() : null;
+const nativeConfig = () => JSON.stringify({ app: appAddress(), key: store.get('key') || '', token: store.get('token') || '' });
+
+// After every connect: refresh the menu state and re-register, since re-pairing gives the device a new id.
+async function syncNotify() {
+  try {
+    if (nativeNotify()) {
+      notifyOn = window.CursorRemoteApp.notifyEnabled();
+      if (notifyOn) window.CursorRemoteApp.setNotify(nativeConfig());
+      return;
+    }
+    const sub = await pushSub();
+    notifyOn = Boolean(sub);
+    if (sub) await post('/api/push/subscribe', { sub: sub.toJSON() });
+  } catch {}
+}
+
+async function enableNotify() {
+  if (nativeNotify()) {
+    window.CursorRemoteApp.setNotify(nativeConfig());
+    notifyOn = true;
+    return status('通知已开启。华为等手机请在「设置 → 应用启动管理」里允许本 App 后台活动');
+  }
+  if (inApp) return status('请先在菜单里更新安卓 App，新版才支持通知', false);
+  if (!webPush()) {
+    const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
+    return status(ios && !standalone() ? 'iPhone 要先「分享 → 添加到主屏幕」，从桌面图标打开后才能开启通知' : '这个浏览器不支持通知', false);
+  }
+  // Must be the first await: iOS only shows the permission prompt directly inside a tap.
+  const permission = await Notification.requestPermission();
+  if (permission !== 'granted') return status('没有通知权限，请在系统设置里允许本 App 发通知', false);
+  try {
+    const { key } = await api('/api/push/key').then(r => r.json());
+    const reg = await swReady();
+    const sub = await reg.pushManager.getSubscription() || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64u(key) });
+    const r = await post('/api/push/subscribe', { sub: sub.toJSON() });
+    if (!r.ok) throw new Error((await r.json()).error || '注册失败');
+    notifyOn = true;
+    status('通知已开启');
+  } catch (e) {
+    status('开启通知失败：' + e.message, false);
+  }
+}
+
+async function disableNotify() {
+  if (nativeNotify()) window.CursorRemoteApp.setNotify('');
+  else {
+    await (await pushSub().catch(() => null))?.unsubscribe().catch(() => {});
+    await post('/api/push/unsubscribe').catch(() => {});
+  }
+  notifyOn = false;
+  status('通知已关闭');
+}
+
+function openWin(id) {
+  if (!id) return;
+  store.set('window', id);
+  if (authed) send({ t: 'attach', id });
+}
+window.openWin = openWin;
+navigator.serviceWorker?.addEventListener('message', e => openWin(e.data?.openWin));
+document.addEventListener('visibilitychange', () => {
+  if (authed) send({ t: 'visible', v: document.visibilityState === 'visible' });
+});
+
 function showInstallHelp() {
   const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
   if (ios) {
@@ -654,6 +743,13 @@ $('sheet').addEventListener('click', async e => {
     await navigator.clipboard?.writeText(appAddress()).then(() => status('已复制地址'), () => status('复制失败，请手动记下地址', false));
   }
   else if (act === 'changeUrl') window.CursorRemoteApp?.changeUrl();
+  else if (act === 'notifyOn') { closeSheet(); enableNotify(); }
+  else if (act === 'notifyOff') { closeSheet(); disableNotify(); }
+  else if (act === 'notifyTest') {
+    closeSheet();
+    const r = await post('/api/push/test').catch(() => null);
+    status(r?.ok ? '已发送测试通知，几秒内应该收到' : '发送失败', Boolean(r?.ok));
+  }
   else if (act === 'appUpdate') {
     if (apkUpdate()) { closeSheet(); installAppUpdate(); }
     else { await checkAppUpdate(true); if (apkUpdate()) showMainMenu(); }
@@ -958,7 +1054,7 @@ $('send').onclick = () => {
 };
 
 window.addEventListener('resize', () => { layoutStage(); applyQuality(); });
-if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('sw.js').catch(() => {});
 
 setCrop(crop);
 setMode(mode);
