@@ -338,7 +338,8 @@ function pageHelpers() {
   };
 
   // Cheap per-window check for notifications: is the Agent running, and is it waiting on a button?
-  const WAIT = /^(run|allow|accept|approve|continue|yes\b|运行|允许|接受|批准|继续)/i;
+  // "Run in background" shows up on any command running longer than ~5 s; it is not a request for approval.
+  const WAIT = /^(?!.*(background|后台))(run|allow|accept|approve|continue|yes\b|运行|允许|接受|批准|继续)/i;
   const agentState = () => {
     const panel = findPanel();
     if (!panel) return null;
