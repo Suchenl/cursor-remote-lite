@@ -68,6 +68,22 @@
   #actionBar button { flex: 1; padding: 9px; font-weight: 600; }
   #queueBar { flex: none; display: none; flex-direction: column; gap: 6px; padding: 7px 12px; background: #23272e; border-top: 1px solid #333; max-height: 34vh; overflow-y: auto; }
   #queueBar.show { display: flex; }
+  #qnBar { flex: none; display: none; flex-direction: column; gap: 8px; padding: 10px 12px; background: #2a2620; border-top: 2px solid #e5c07b; max-height: 48vh; overflow-y: auto; }
+  #qnBar.show { display: flex; }
+  #qnBar .qnHead { font-size: 12.5px; color: #e5c07b; font-weight: 600; }
+  #qnBar .qnQ { font-size: 14.5px; color: #eee; white-space: pre-wrap; }
+  #qnBar .qnOpts { display: flex; flex-direction: column; gap: 6px; }
+  #qnBar .qnOpt { text-align: left; font-size: 14px; padding: 8px 10px; display: flex; gap: 8px; }
+  #qnBar .qnOpt b { color: #999; flex: none; }
+  #qnBar .qnOpt.on { border-color: #e5c07b; background: #3a3220; }
+  #qnBar .qnOpt.on b { color: #e5c07b; }
+  #qnBar .qnFree { display: flex; gap: 6px; }
+  #qnBar .qnFree input { flex: 1; min-width: 0; font-size: 14px; }
+  #qnBar .qnFree.on input { border-color: #e5c07b; }
+  #qnBar .qnAct { display: flex; gap: 8px; justify-content: flex-end; }
+  #qnBar .qnAct button { padding: 7px 16px; }
+  #qnBar .qnAct .primary { background: #0e639c; border-color: #1177bb; color: #fff; font-weight: 600; }
+  #qnBar .qnAct .primary:disabled { opacity: .45; }
   #queueBar .run { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: #9cc8ff; }
   #queueBar .run span { flex: 1; min-width: 0; }
   #queueBar .run i { width: 8px; height: 8px; border-radius: 50%; background: #4af; flex: none; animation: pulse 1.2s ease-in-out infinite; }
@@ -195,6 +211,7 @@
       <div id="empty" hidden>没找到聊天面板。<br>请在 Cursor 里打开 Agent 对话，或切到「画面」查看。</div>
     </div>
     <button id="toBottom">↓ 最新</button>
+    <div id="qnBar"></div>
     <div id="queueBar"></div>
     <div id="actionBar"></div>
   </section>
@@ -924,7 +941,7 @@ function renderChat(chat) {
   $('pickModel').hidden = !chat?.model;
   if (chat?.mode) $('pickMode').textContent = chat.mode + ' ▾';
   if (chat?.model) $('pickModel').textContent = chat.model + ' ▾';
-  if (!chat) { itemsEl.replaceChildren(); renderQueue(false, []); return; }
+  if (!chat) { itemsEl.replaceChildren(); renderQueue(false, []); renderQuestions(null); return; }
   const stick = nearBottom();
   // Anchor on the first visible item so loading older messages doesn't jump.
   let anchor = null, anchorTop = 0;
@@ -949,6 +966,7 @@ function renderChat(chat) {
   $('actionBar').innerHTML = buttonsHtml(chat.global, 'g');
   $('actionBar').classList.toggle('show', chat.global.length > 0);
   renderQueue(chat.busy, chat.queued || [], chat.subagents || [], chat.readonly, chat.changed);
+  renderQuestions(chat.readonly ? null : chat.questions);
 
   if (stick) list.scrollTop = list.scrollHeight;
   else if (anchor) {
@@ -959,6 +977,42 @@ function renderChat(chat) {
 }
 
 let subsOpen = false;
+// The Agent's ask-question tool: a card with the questions, options, a free-text answer and submit / skip.
+let qnSig = '';
+function renderQuestions(qs) {
+  const bar = $('qnBar');
+  const sig = JSON.stringify(qs);
+  if (sig === qnSig) return;
+  qnSig = sig;
+  if (!qs?.list?.length) { bar.innerHTML = ''; bar.classList.remove('show'); return; }
+  bar.innerHTML = `<div class="qnHead">❓ Agent 在问你${qs.list.length > 1 ? `（${qs.list.length} 个问题）` : ''}</div>`
+    + qs.list.map((q, qi) => `<div class="qnQ">${qs.list.length > 1 ? `${qi + 1}. ` : ''}${esc(q.text)}</div><div class="qnOpts">`
+      + q.options.map((o, oi) => {
+        const letter = String.fromCharCode(65 + oi);
+        return o.free
+          ? `<div class="qnFree ${o.sel ? 'on' : ''}"><input data-qi="${qi}" data-oi="${oi}" placeholder="其他…" value="${esc(o.value)}" enterkeyhint="done"><button data-qfree="${qi}:${oi}">填入</button></div>`
+          : `<button class="qnOpt ${o.sel ? 'on' : ''}" data-qi="${qi}" data-oi="${oi}"><b>${letter}</b><span>${esc(o.label)}</span></button>`;
+      }).join('') + '</div>').join('')
+    + `<div class="qnAct"><button data-qpart="skip">跳过</button><button class="primary" data-qpart="submit" ${qs.canSubmit ? '' : 'disabled'}>提交</button></div>`;
+  bar.classList.add('show');
+}
+
+$('qnBar').onclick = e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  if (b.dataset.qpart) { status(b.dataset.qpart === 'skip' ? '已跳过' : '已提交'); return send({ t: 'question', part: b.dataset.qpart }); }
+  if (b.dataset.qfree) {
+    const [qi, oi] = b.dataset.qfree.split(':').map(Number);
+    return send({ t: 'question', qi, oi, part: 'option', text: b.previousElementSibling.value });
+  }
+  if (b.dataset.qi) send({ t: 'question', qi: Number(b.dataset.qi), oi: Number(b.dataset.oi), part: 'option' });
+};
+$('qnBar').addEventListener('keydown', e => {
+  if (e.key !== 'Enter' || !e.target.matches('input')) return;
+  e.preventDefault();
+  e.target.nextElementSibling.click();
+});
+
 function renderQueue(busy, queued, subs = [], readonly = false, changed = 0) {
   const bar = $('queueBar');
   let html = '';

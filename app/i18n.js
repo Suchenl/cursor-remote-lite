@@ -80,6 +80,8 @@ const I18N = (() => {
     '图片已附加到 Cursor 输入框，写好文字后点发送': 'Image attached in Cursor; type your message and tap Send',
     '只支持 PNG / JPEG / GIF / WebP 图片': 'Only PNG / JPEG / GIF / WebP images are supported',
     'Cursor 没有接收这张图片（当前模型可能不支持图片）': "Cursor didn't accept the image (the current model may not support images)",
+    '❓ Agent 在问你': '❓ The Agent is asking you', '其他…': 'Other…', '填入': 'Set', '跳过': 'Skip', '提交': 'Submit', '已跳过': 'Skipped', '已提交': 'Submitted',
+    '这个问题已经不在了（可能已在电脑上回答）': 'That question is gone (maybe it was answered on the computer)',
     '保留': 'Keep', '撤销': 'Undo', '读取改动的文件…': 'Loading changed files…', '没有待处理的改动': 'No pending changes',
     '正在撤销…': 'Undoing…', '正在保留…': 'Keeping…', '处理中…': 'Working…',
     '点文件名查看内容。「保留」接受这个文件的改动，「撤销」把它恢复成改动前的样子。': 'Tap a file name to view it. "Keep" accepts the change to that file; "Undo" restores it to how it was before.',
@@ -118,6 +120,7 @@ const I18N = (() => {
     [/^子 Agent 运行中 (\d+) 个$/, 'Subagents running: $1'],
     [/^排队中 (\d+) 条$/, 'Queued: $1'],
     [/^停止子 Agent「(.+)」？$/, 'Stop subagent "$1"?'],
+    [/^❓ Agent 在问你（(\d+) 个问题）$/, '❓ The Agent is asking you ($1 questions)'],
     [/^改动了 1 个文件 ›$/, '1 file changed ›'],
     [/^改动了 (\d+) 个文件 ›$/, '$1 files changed ›'],
     [/^Agent 改动的文件（(\d+)）$/, 'Files changed by the Agent ($1)'],
@@ -148,7 +151,7 @@ const I18N = (() => {
   const tr = s => lang === 'zh' || s == null ? s : String(s).split('\n').map(line).join('\n');
 
   // Content mirrored from Cursor or the computer's files is never translated.
-  const SKIP = '#items, #vBody, #vName, #vPath, #titleText, .qt, [data-label] .lbl, [data-win] .lbl';
+  const SKIP = '#items, #vBody, #vName, #vPath, #titleText, .qt, [data-label] .lbl, [data-win] .lbl, .qnQ, .qnOpt span';
   const ATTRS = ['placeholder', 'title', 'aria-label'];
   const fix = node => {
     if (node.nodeType === 3) {

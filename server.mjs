@@ -315,6 +315,43 @@ function pageHelpers() {
   };
   const hasComposer = () => [...document.querySelectorAll('.aislash-editor-input[contenteditable="true"], .ui-prompt-input-editor__input[contenteditable="true"]')].some(vis);
 
+  // The Agent's ask-question tool renders as a toolbar above the composer, outside the message list.
+  const QN = '.composer-questionnaire-toolbar';
+  const qnBox = () => [...document.querySelectorAll(QN)].find(vis);
+  const inQn = el => !!el.closest(QN);
+  const qnOptions = q => [...q.querySelectorAll('.composer-questionnaire-toolbar-option')];
+  const qnAction = (box, re) => [...box.querySelectorAll('.composer-questionnaire-toolbar-actions > *')].find(e => vis(e) && re.test(e.innerText));
+  const questions = () => {
+    const box = qnBox();
+    if (!box) return null;
+    const list = [...box.querySelectorAll('.composer-questionnaire-toolbar-question')].map(q => ({
+      text: (q.querySelector('.composer-questionnaire-toolbar-question-label .markdown-root') || q.querySelector('.composer-questionnaire-toolbar-question-label'))?.innerText.trim() || '',
+      options: qnOptions(q).map(o => {
+        const ta = o.querySelector('textarea');
+        return {
+          label: ta ? '' : o.querySelector('.composer-questionnaire-toolbar-option-label')?.innerText.trim() || '',
+          free: !!ta, value: ta?.value || '',
+          sel: !!o.querySelector('.composer-questionnaire-toolbar-option-letter-selected'),
+        };
+      }),
+    }));
+    const submit = qnAction(box, /continue|submit|继续|提交/i);
+    return { list, canSubmit: !!submit && submit.dataset.disabled !== 'true' };
+  };
+  const questionTarget = (qi, oi, part) => {
+    const box = qnBox();
+    if (!box) return null;
+    if (part === 'submit' || part === 'skip') {
+      const b = qnAction(box, part === 'skip' ? /skip|跳过/i : /continue|submit|继续|提交/i);
+      return b ? center(b) : null;
+    }
+    const q = box.querySelectorAll('.composer-questionnaire-toolbar-question')[qi];
+    const o = q && qnOptions(q)[oi];
+    if (!o) return null;
+    o.scrollIntoView({ block: 'nearest' });
+    return center(o.querySelector('textarea') || o);
+  };
+
   // Files changed by the Agent: the "N Files" toggle above the composer expands a list with per-file undo / keep.
   const filesToggle = () => [...document.querySelectorAll('span.cursor-pointer')].find(e => vis(e) && /^\d+ Files?$/.test(e.innerText.trim().replace(/\s+/g, ' ')));
   const changedCount = () => parseInt(filesToggle()?.innerText || '0', 10) || 0;
@@ -379,7 +416,7 @@ function pageHelpers() {
       if (b.length) item.b = b.map(x => x.label);
       return item;
     });
-    const global = buttonsIn(panel, true).filter(x => !x.el.closest('[data-flat-index]')).map(x => x.label);
+    const global = buttonsIn(panel, true).filter(x => !x.el.closest('[data-flat-index]') && !inQn(x.el)).map(x => x.label);
     const modeEl = [...document.querySelectorAll('.composer-unified-dropdown[data-mode]')].find(vis);
     const modelEl = [...document.querySelectorAll('.ui-model-picker__trigger, .composer-unified-dropdown-model')].find(vis);
     return {
@@ -390,6 +427,7 @@ function pageHelpers() {
       queued: queued(),
       subagents: subagents(),
       changed: changedCount(),
+      questions: questions(),
       readonly: !hasComposer(),
       mode: modeEl ? modeEl.innerText.trim() || modeEl.dataset.mode : null,
       model: modelEl ? modelEl.innerText.trim() : null,
@@ -471,7 +509,7 @@ function pageHelpers() {
     if (!panel) return null;
     const root = item === 'g' ? panel : panel.querySelector(`[data-flat-index="${CSS.escape(item)}"]`);
     if (!root) return null;
-    const list = item === 'g' ? buttonsIn(panel, true).filter(x => !x.el.closest('[data-flat-index]')) : buttonsIn(root, false);
+    const list = item === 'g' ? buttonsIn(panel, true).filter(x => !x.el.closest('[data-flat-index]') && !inQn(x.el)) : buttonsIn(root, false);
     const b = list[n]?.el;
     if (!b) return null;
     b.scrollIntoView({ block: 'center' });
@@ -499,8 +537,14 @@ function pageHelpers() {
       const labels = buttonsIn(el, false).map(x => x.label).filter(l => WAIT.test(l));
       if (labels.length) { waiting = `${el.dataset.flatIndex}:${labels.join('/')}`; waitingText = summary(el); }
     }
-    const global = buttonsIn(panel, true).filter(x => !x.el.closest('[data-flat-index]') && WAIT.test(x.label)).map(x => x.label);
+    const global = buttonsIn(panel, true).filter(x => !x.el.closest('[data-flat-index]') && !inQn(x.el) && WAIT.test(x.label)).map(x => x.label);
     if (!waiting && global.length) { waiting = `g:${global.join('/')}`; waitingText = global.join(' / '); }
+    const qs = questions();
+    if (qs?.list.length) {
+      const text = qs.list.map(q => q.text).join(' / ');
+      waiting = `q:${text.slice(0, 120)}`;
+      waitingText = text;
+    }
     const lastReply = [...items].reverse().find(el => el.matches('[data-message-kind="assistant"]') || el.querySelector('[data-message-kind="assistant"]'));
     const last = lastReply ? lastReply.innerText.trim().replace(/\s+/g, ' ').slice(0, 160) : '';
     return { busy, waiting, waitingText, last };
@@ -516,7 +560,7 @@ function pageHelpers() {
   };
 
   return { extract, locate, panelRect, control, menuItems, menuItem, quickOpenRows, agentState, queueTarget, stopTarget, focusQueueEdit,
-    menuOpen, maxToggle, modelTarget, modelParams, paramTarget, subTarget, activeChatTab, tabTarget, hasComposer, filesState, fileTarget };
+    menuOpen, maxToggle, modelTarget, modelParams, paramTarget, subTarget, activeChatTab, tabTarget, hasComposer, filesState, fileTarget, questionTarget };
 }
 
 const helpersCall = call => `(${pageHelpers.toString()})().${call}`;
@@ -1019,6 +1063,20 @@ class Session {
     return Boolean(busy);
   }
 
+  async answerQuestion(qi, oi, part, text) {
+    const call = p => helpersCall(`questionTarget(${Number(qi) || 0}, ${Number(oi) || 0}, ${JSON.stringify(p)})`);
+    const pos = await this.cdp.evaluate(call(part));
+    if (!pos) throw new Error('这个问题已经不在了（可能已在电脑上回答）');
+    await this.tapCss(pos.x, pos.y);
+    if (part === 'option' && typeof text === 'string') {
+      await new Promise(r => setTimeout(r, 150));
+      await this.cdp.evaluate(`document.activeElement?.select?.()`);
+      if (text) await this.typeText(text);
+      else await this.key('Backspace');
+    }
+    setTimeout(() => this.pollChat().catch(() => {}), 300);
+  }
+
   async attachImage(data, name, type) {
     if (!/^image\/(png|jpeg|gif|webp)$/.test(type) || typeof data !== 'string' || !/^[A-Za-z0-9+/=]+$/.test(data)) throw new Error('只支持 PNG / JPEG / GIF / WebP 图片');
     const ok = await this.cdp.evaluate(pasteImage(data, String(name || 'image').replace(/[^\w.\-]/g, '_').slice(0, 60), type));
@@ -1048,6 +1106,7 @@ class Session {
       case 'subagent': return this.subagentAction(msg.name, msg.part === 'stop' ? 'stop' : 'open');
       case 'mainChat': return this.backToMain();
       case 'image': return this.attachImage(msg.data, msg.name, msg.type);
+      case 'question': return this.answerQuestion(msg.qi, msg.oi, ['option', 'submit', 'skip'].includes(msg.part) ? msg.part : 'option', msg.text);
       case 'changes': return this.listChanges();
       case 'change': return this.changeAction(msg.i, msg.name, msg.act);
       case 'scrollChat': return this.scrollChat(Number(msg.dy) || 0);
