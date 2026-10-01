@@ -66,6 +66,17 @@
   #actionBar { flex: none; display: none; gap: 8px; flex-wrap: wrap; padding: 8px 12px; background: #2a2d2e; border-top: 1px solid #333; }
   #actionBar.show { display: flex; }
   #actionBar button { flex: 1; padding: 9px; font-weight: 600; }
+  #queueBar { flex: none; display: none; flex-direction: column; gap: 6px; padding: 7px 12px; background: #23272e; border-top: 1px solid #333; max-height: 34vh; overflow-y: auto; }
+  #queueBar.show { display: flex; }
+  #queueBar .run { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: #9cc8ff; }
+  #queueBar .run span { flex: 1; min-width: 0; }
+  #queueBar .run i { width: 8px; height: 8px; border-radius: 50%; background: #4af; flex: none; animation: pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .25; } }
+  #queueBar .qh { font-size: 12px; color: #999; }
+  #queueBar .q { display: flex; align-items: center; gap: 6px; font-size: 13.5px; }
+  #queueBar .q .qt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #ccc; }
+  #queueBar .q .qt::before { content: "○ "; color: #777; }
+  #queueBar button { font-size: 12px; padding: 3px 9px; flex: none; }
 
   /* screen view */
   .tools { flex: none; display: flex; gap: 6px; padding: 6px 8px; overflow-x: auto; scrollbar-width: none; background: #252526; border-bottom: 1px solid #333; min-width: 0; }
@@ -160,6 +171,7 @@
       <div id="empty" hidden>没找到聊天面板。<br>请在 Cursor 里打开 Agent 对话，或切到「画面」查看。</div>
     </div>
     <button id="toBottom">↓ 最新</button>
+    <div id="queueBar"></div>
     <div id="actionBar"></div>
   </section>
 
@@ -819,7 +831,7 @@ function renderChat(chat) {
   $('pickModel').hidden = !chat?.model;
   if (chat?.mode) $('pickMode').textContent = chat.mode + ' ▾';
   if (chat?.model) $('pickModel').textContent = chat.model + ' ▾';
-  if (!chat) { itemsEl.replaceChildren(); return; }
+  if (!chat) { itemsEl.replaceChildren(); renderQueue(false, []); return; }
   const stick = nearBottom();
   // Anchor on the first visible item so loading older messages doesn't jump.
   let anchor = null, anchorTop = 0;
@@ -843,6 +855,7 @@ function renderChat(chat) {
 
   $('actionBar').innerHTML = buttonsHtml(chat.global, 'g');
   $('actionBar').classList.toggle('show', chat.global.length > 0);
+  renderQueue(chat.busy, chat.queued || []);
 
   if (stick) list.scrollTop = list.scrollHeight;
   else if (anchor) {
@@ -851,6 +864,28 @@ function renderChat(chat) {
   }
   updateToBottom();
 }
+
+function renderQueue(busy, queued) {
+  const bar = $('queueBar');
+  let html = '';
+  if (busy) html += `<div class="run"><i></i><span>Agent 正在运行${queued.length ? '，下面的消息会在这一轮结束后依次发送' : '，现在发的消息会先排队'}</span><button data-stop>停止</button></div>`;
+  if (queued.length) {
+    html += `<div class="qh">排队中 ${queued.length} 条</div>`;
+    html += queued.map(q => `<div class="q"><span class="qt">${esc(q.t || '(空)')}</span>`
+      + `<button data-q="${esc(q.id)}" data-a="send" title="打断当前这一轮，立刻发送">立即发送</button>`
+      + `<button data-q="${esc(q.id)}" data-a="remove">删除</button></div>`).join('');
+  }
+  bar.innerHTML = html;
+  bar.classList.toggle('show', Boolean(html));
+}
+
+$('queueBar').onclick = e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  if ('stop' in b.dataset) { send({ t: 'stop' }); status('已停止 Agent'); return; }
+  send({ t: 'queue', id: b.dataset.q, action: b.dataset.a });
+  status(b.dataset.a === 'send' ? '已立即发送这条排队消息' : '已删除这条排队消息');
+};
 
 function updateToBottom() {
   $('toBottom').style.display = nearBottom() ? 'none' : 'block';

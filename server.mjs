@@ -250,6 +250,32 @@ function pageHelpers() {
 
   const topItems = panel => [...panel.querySelectorAll('[data-flat-index]')].filter(e => !e.parentElement.closest('[data-flat-index]'));
 
+  // Messages sent while the Agent is running wait in Cursor's queue tray until the current turn ends.
+  const QUEUE_ROW = '[data-queue-row], .composer-toolbar-queue-item[data-queue-item-id]';
+  const queueRows = () => [...document.querySelectorAll(QUEUE_ROW)].filter(vis);
+  const queued = () => queueRows().map(e => ({
+    id: e.dataset.queueItemId,
+    t: (e.dataset.queueItemQuery || e.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 300),
+  }));
+  const isBusy = () => [...document.querySelectorAll('.composer-button-area .codicon-debug-stop, .send-with-mode .codicon-debug-stop')].some(vis);
+
+  // First call (no action) returns the row center to hover over; hover-only buttons appear after that.
+  const queueTarget = (id, action) => {
+    const row = queueRows().find(e => e.dataset.queueItemId === id);
+    if (!row) return null;
+    row.scrollIntoView({ block: 'nearest' });
+    if (!action) return center(row);
+    const b = row.querySelector(`[data-queue-action="${CSS.escape(action)}"]`)
+      || [...row.querySelectorAll('[aria-label]')].find(e => e.getAttribute('aria-label') === { send: 'Send now', remove: 'Remove', edit: 'Edit' }[action]);
+    return b && vis(b) ? center(b) : null;
+  };
+
+  const stopTarget = () => {
+    const icon = [...document.querySelectorAll('.composer-button-area .codicon-debug-stop, .send-with-mode .codicon-debug-stop')].find(vis);
+    if (!icon) return null;
+    return center(icon.closest('button, [role=button], .anysphere-icon-button') || icon);
+  };
+
   const extract = () => {
     const panel = findPanel();
     if (!panel) return null;
@@ -273,6 +299,8 @@ function pageHelpers() {
       rect: [r.x, r.y, r.width, r.height].map(Math.round),
       items,
       global,
+      busy: isBusy(),
+      queued: queued(),
       mode: modeEl ? modeEl.innerText.trim() || modeEl.dataset.mode : null,
       model: modelEl ? modelEl.innerText.trim() : null,
     };
@@ -343,7 +371,7 @@ function pageHelpers() {
   const agentState = () => {
     const panel = findPanel();
     if (!panel) return null;
-    const busy = [...document.querySelectorAll('.composer-button-area .codicon-debug-stop, .send-with-mode .codicon-debug-stop')].some(vis);
+    const busy = isBusy();
     const items = topItems(panel);
     let waiting = null, waitingText = '';
     for (const el of items.slice(-3)) {
@@ -366,7 +394,7 @@ function pageHelpers() {
     }));
   };
 
-  return { extract, locate, panelRect, control, menuItems, menuItem, quickOpenRows, agentState };
+  return { extract, locate, panelRect, control, menuItems, menuItem, quickOpenRows, agentState, queueTarget, stopTarget };
 }
 
 const helpersCall = call => `(${pageHelpers.toString()})().${call}`;
@@ -433,6 +461,29 @@ class Session {
   async clickButton(item, n) {
     const pos = await this.cdp.evaluate(helpersCall(`locate(${JSON.stringify(String(item))}, ${Number(n) || 0})`));
     if (!pos) throw new Error('按钮已经不在了，可能状态已变化');
+    await this.tapCss(pos.x, pos.y);
+    setTimeout(() => this.pollChat().catch(() => {}), 300);
+  }
+
+  async queueAction(id, action) {
+    if (!['send', 'remove'].includes(action)) throw new Error('不支持的排队操作');
+    const call = a => this.cdp.evaluate(helpersCall(`queueTarget(${JSON.stringify(String(id))}${a ? `, ${JSON.stringify(a)}` : ''})`));
+    const row = await call();
+    if (!row) throw new Error('这条排队消息已经不在了（可能刚被发出）');
+    await this.cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: row.x, y: row.y });
+    let pos = null;
+    for (let i = 0; i < 6 && !pos; i++) {
+      await new Promise(r => setTimeout(r, 80));
+      pos = await call(action);
+    }
+    if (!pos) throw new Error('没找到排队消息的操作按钮（可能 Cursor 版本不同）');
+    await this.tapCss(pos.x, pos.y);
+    setTimeout(() => this.pollChat().catch(() => {}), 300);
+  }
+
+  async stopAgent() {
+    const pos = await this.cdp.evaluate(helpersCall('stopTarget()'));
+    if (!pos) throw new Error('Agent 当前没有在运行');
     await this.tapCss(pos.x, pos.y);
     setTimeout(() => this.pollChat().catch(() => {}), 300);
   }
@@ -701,9 +752,11 @@ class Session {
   async sendMessage(text, submit) {
     const found = await this.cdp.evaluate(FOCUS_COMPOSER);
     if (!found) throw new Error('没找到可见的聊天输入框：先在画面里打开 Agent 面板（或点「打开聊天」）');
+    const busy = submit && await this.cdp.evaluate(helpersCall('agentState()?.busy'));
     await this.typeText(text);
     if (submit) await this.key('Enter');
     if (this.mode === 'chat') setTimeout(() => this.pollChat().catch(() => {}), 300);
+    return Boolean(busy);
   }
 
   async handle(msg) {
@@ -719,6 +772,8 @@ class Session {
       case 'agentsWindow': return this.openAgentsWindow();
       case 'file': return this.openFile(String(msg.path ?? ''));
       case 'click': return this.clickButton(msg.item, msg.n);
+      case 'queue': return this.queueAction(msg.id, msg.action);
+      case 'stop': return this.stopAgent();
       case 'scrollChat': return this.scrollChat(Number(msg.dy) || 0);
       case 'tap': return this.tap(msg.x, msg.y, msg.button);
       case 'wheel': return this.wheel(msg.x, msg.y, msg.dx || 0, msg.dy || 0);
@@ -918,8 +973,9 @@ wss.on('connection', (ws, req) => {
     if (msg.t === 'ack') return session.ack();
     queue = queue.then(async () => {
       try {
-        await session.handle(msg);
-        if (msg.t === 'send' || msg.t === 'type') session.emit({ t: 'status', ok: true, msg: '已发送' });
+        const queued = await session.handle(msg);
+        if (msg.t === 'type') session.emit({ t: 'status', ok: true, msg: '已发送' });
+        if (msg.t === 'send') session.emit({ t: 'status', ok: true, msg: queued ? 'Agent 正在运行，已加入排队，这一轮结束后自动发送' : '已发送' });
       } catch (e) {
         session.emit({ t: 'status', ok: false, msg: e.message });
       }
