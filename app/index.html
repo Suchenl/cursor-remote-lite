@@ -95,7 +95,7 @@
   #chatTools { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; min-width: 0; }
   #chatTools::-webkit-scrollbar { display: none; }
   #chatTools button { font-size: 12.5px; padding: 3px 10px; border-radius: 14px; flex: none; white-space: nowrap; }
-  #chatTools #pickModel { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  #chatTools #pickModel { flex: 0 1 auto; min-width: 84px; overflow: hidden; text-overflow: ellipsis; }
   .row { display: flex; gap: 8px; min-width: 0; align-items: flex-end; }
   textarea { flex: 1; min-width: 0; min-height: 40px; max-height: 32vh; padding: 9px 10px; resize: none; font-size: 16px; line-height: 1.35; }
   #img { flex: none; height: 40px; width: 40px; padding: 0; display: flex; align-items: center; justify-content: center; color: #bbb; }
@@ -227,7 +227,6 @@
   <div id="chatTools">
     <button id="pickMode" hidden></button>
     <button id="pickModel" hidden></button>
-    <button id="changes" hidden></button>
     <button id="pickHistory">历史</button>
     <button id="newChat">＋ 新建</button>
   </div>
@@ -929,8 +928,6 @@ function renderChat(chat) {
   $('pickModel').hidden = !chat?.model;
   if (chat?.mode) $('pickMode').textContent = chat.mode + ' ▾';
   if (chat?.model) $('pickModel').textContent = chat.model + ' ▾';
-  $('changes').hidden = !chat?.changed;
-  if (chat?.changed) $('changes').textContent = `改动 ${chat.changed} 个文件`;
   if (!chat) { itemsEl.replaceChildren(); renderQueue(false, []); return; }
   const stick = nearBottom();
   // Anchor on the first visible item so loading older messages doesn't jump.
@@ -955,7 +952,7 @@ function renderChat(chat) {
 
   $('actionBar').innerHTML = buttonsHtml(chat.global, 'g');
   $('actionBar').classList.toggle('show', chat.global.length > 0);
-  renderQueue(chat.busy, chat.queued || [], chat.subagents || [], chat.readonly);
+  renderQueue(chat.busy, chat.queued || [], chat.subagents || [], chat.readonly, chat.changed);
 
   if (stick) list.scrollTop = list.scrollHeight;
   else if (anchor) {
@@ -966,7 +963,7 @@ function renderChat(chat) {
 }
 
 let subsOpen = false;
-function renderQueue(busy, queued, subs = [], readonly = false) {
+function renderQueue(busy, queued, subs = [], readonly = false, changed = 0) {
   const bar = $('queueBar');
   let html = '';
   if (readonly) html += `<div class="run sub"><span>正在查看子 Agent 的对话（只读）</span><button data-main>返回主对话</button></div>`;
@@ -983,6 +980,7 @@ function renderQueue(busy, queued, subs = [], readonly = false) {
       + `<button data-q="${esc(q.id)}" data-a="send" title="打断当前这一轮，立刻发送">立即发送</button>`
       + `<button data-q="${esc(q.id)}" data-a="remove">删除</button></div>`).join('');
   }
+  if (changed && !readonly) html += `<button class="qh fold" data-changes>改动了 ${changed} 个文件 ›</button>`;
   bar.innerHTML = html;
   bar.classList.toggle('show', Boolean(html));
 }
@@ -1006,7 +1004,8 @@ function editQueued(id) {
 $('queueBar').onclick = async e => {
   const b = e.target.closest('button');
   if (!b) return;
-  if ('fold' in b.dataset) { subsOpen = !subsOpen; return renderQueue(lastChat?.busy, lastChat?.queued || [], lastChat?.subagents || [], lastChat?.readonly); }
+  if ('changes' in b.dataset) { status('读取改动的文件…'); return send({ t: 'changes' }); }
+  if ('fold' in b.dataset) { subsOpen = !subsOpen; return renderQueue(lastChat?.busy, lastChat?.queued || [], lastChat?.subagents || [], lastChat?.readonly, lastChat?.changed); }
   if ('stop' in b.dataset) {
     if (!await ask('停止 Agent？\n它这一轮正在做的事会中断。', '停止')) return;
     send({ t: 'stop' }); status('已停止 Agent'); return;
@@ -1045,7 +1044,6 @@ document.addEventListener('click', async e => {
 
 $('pickMode').onclick = () => { status('读取模式列表…'); send({ t: 'openMenu', kind: 'mode' }); };
 $('pickModel').onclick = () => { status('读取模型列表…'); send({ t: 'openMenu', kind: 'model' }); };
-$('changes').onclick = () => { status('读取改动的文件…'); send({ t: 'changes' }); };
 $('pickHistory').onclick = () => { status('读取历史对话…'); send({ t: 'openMenu', kind: 'history' }); };
 $('newChat').onclick = () => { send({ t: 'newChat' }); status('已新建对话'); };
 

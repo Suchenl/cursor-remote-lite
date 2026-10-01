@@ -7,15 +7,17 @@
 
 > 灵感来自 [len5ky/CursorRemote](https://github.com/len5ky/CursorRemote)，这是一个从零实现的免费版本。
 
-<p align="center"><img src="docs/quickstart.gif" width="300" alt="上手演示：预览文件、切换窗口、换模型、批准命令、发消息"></p>
+<p align="center"><img src="docs/quickstart.gif" width="300" alt="上手演示：预览文件、切换窗口、调模型参数、批准命令、运行中排队发消息、处理改动的文件"></p>
 
-<p align="center"><sub>演示：点文件名预览 → 切到 SSH 窗口 → 换模型 → 批准命令 → 发消息并看 Agent 实时回复（演示数据）</sub></p>
+<p align="center"><sub>演示：点文件名预览 → 切到 SSH 窗口 → 调模型思考强度 → 批准运行测试 → 展开子 Agent → Agent 运行中发消息自动排队，这一轮结束后发出 → 逐个保留 / 撤销改动的文件（撤销前会确认）（演示数据）</sub></p>
 
 ## 界面
 
 | 聊天 | 文件预览 | 切换窗口 | 选模型 |
 |:-:|:-:|:-:|:-:|
 | <img src="docs/ui-chat.png" width="190" alt="聊天"> | <img src="docs/ui-file.png" width="190" alt="文件预览"> | <img src="docs/ui-windows.png" width="190" alt="切换窗口"> | <img src="docs/ui-model.png" width="190" alt="选模型"> |
+| **模型参数** | **运行中：子 Agent + 排队** | **改动的文件** | **危险操作二次确认** |
+| <img src="docs/ui-params.png" width="190" alt="模型参数"> | <img src="docs/ui-running.png" width="190" alt="运行中：子 Agent 和排队消息"> | <img src="docs/ui-changes.png" width="190" alt="改动的文件"> | <img src="docs/ui-confirm.png" width="190" alt="二次确认"> |
 
 ## 为什么做这个
 
@@ -74,7 +76,7 @@ Agent 一跑就是十几分钟，中间经常停下来等你点「运行」或�
 - **模型参数**：模型列表里点「参数」可以调上下文长度（如 300K / 1M）、思考强度（Low → Max）、Fast 开关；顶部还有 MAX Mode 开关。能调哪些由 Cursor 对这个模型提供什么决定。
 - **排队消息**：Agent 正在跑时发的消息会进 Cursor 的排队列表，手机上会显示「Agent 正在运行」和排队中的每一条，可以修改、立即发送（打断当前这一轮）或删除，也可以一键停止 Agent。
 - **子 Agent**：Agent 派出的子 Agent 正在跑时，手机上会显示「子 Agent 运行中 N 个」（默认收起，点开才列出），点「查看」可以看它自己的对话过程（只读），也可以单独停止它。
-- **改动的文件**：Agent 改过文件后，输入框上方会出现「改动 N 个文件」，点开能看到每个文件加了 / 删了多少行，点文件名看内容，也可以逐个「保留」或「撤销」，和桌面上的 Keep / Undo 一样。
+- **改动的文件**：Agent 改过文件后，输入框上方会出现「改动了 N 个文件 ›」，点开能看到每个文件加了 / 删了多少行，点文件名看内容，也可以逐个「保留」或「撤销」，和桌面上的 Keep / Undo 一样。
 - **发图片**：输入框旁的图片按钮，选一张照片或截图（比如手机拍的报错画面），会附加到 Cursor 的输入框里，再写上文字一起发出去。大图会先在手机上压缩。
 - **防误触**：停止 Agent、停止子 Agent、撤销改动、删除排队消息、拒绝、移除设备、取消配对这类不可逆的操作，都会先弹出确认。
 - **语音输入（默认关闭）**：输入法键盘上的麦克风就能语音输入，所以默认不显示麦克风按钮。需要的话在「⋯ → 语音按钮」里打开：安卓 App 调用系统语音识别，iPhone / 浏览器用浏览器自带的语音识别。

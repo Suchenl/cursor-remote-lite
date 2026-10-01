@@ -7,15 +7,17 @@ Free, open source and self-hosted. No server needed, and your phone doesn't have
 
 > Inspired by [len5ky/CursorRemote](https://github.com/len5ky/CursorRemote); this is a free version written from scratch.
 
-<p align="center"><img src="docs/quickstart.gif" width="300" alt="Demo: preview a file, switch windows, change model, approve a command, send a message"></p>
+<p align="center"><img src="docs/en/quickstart.gif" width="300" alt="Demo: preview a file, switch windows, adjust model parameters, approve a command, queue a message while the Agent runs, handle changed files"></p>
 
-<p align="center"><sub>Demo: tap a file name to preview it → switch to an SSH window → change model → approve a command → send a message and watch the Agent reply live (demo data)</sub></p>
+<p align="center"><sub>Demo: tap a file name to preview it → switch to an SSH window → raise the model's reasoning effort → approve the test run → expand the running subagents → a message sent while the Agent is busy is queued and goes out when the turn ends → keep / undo changed files one by one (undo asks first) (demo data)</sub></p>
 
 ## Screenshots
 
 | Chat | File preview | Switch window | Pick model |
 |:-:|:-:|:-:|:-:|
-| <img src="docs/ui-chat.png" width="190" alt="Chat"> | <img src="docs/ui-file.png" width="190" alt="File preview"> | <img src="docs/ui-windows.png" width="190" alt="Switch window"> | <img src="docs/ui-model.png" width="190" alt="Pick model"> |
+| <img src="docs/en/ui-chat.png" width="190" alt="Chat"> | <img src="docs/en/ui-file.png" width="190" alt="File preview"> | <img src="docs/en/ui-windows.png" width="190" alt="Switch window"> | <img src="docs/en/ui-model.png" width="190" alt="Pick model"> |
+| **Model parameters** | **Running: subagents + queue** | **Changed files** | **Confirm risky actions** |
+| <img src="docs/en/ui-params.png" width="190" alt="Model parameters"> | <img src="docs/en/ui-running.png" width="190" alt="Running: subagents and queued messages"> | <img src="docs/en/ui-changes.png" width="190" alt="Changed files"> | <img src="docs/en/ui-confirm.png" width="190" alt="Confirmation"> |
 
 ## Why I built this
 
@@ -74,7 +76,7 @@ So this project provides both: an Android app that installs without Google servi
 - **Model parameters**: tap "Parameters" in the model list to adjust context length (e.g. 300K / 1M), reasoning effort (Low → Max) and the Fast toggle; there's also a MAX Mode toggle at the top. Which options are available depends on what Cursor offers for that model.
 - **Queued messages**: messages sent while the Agent is running go into Cursor's queue. Your phone shows "Agent is running" plus each queued message, which you can edit, send immediately (interrupting the current turn) or delete. You can also stop the Agent with one tap.
 - **Sub-agents**: while sub-agents spawned by the Agent are running, your phone shows "Subagents running: N" (collapsed by default; tap to expand the list). Tap "View" to see a sub-agent's own conversation (read-only), or stop it individually.
-- **Changed files**: after the Agent edits files, "N changed" appears above the input box. Tap it to see lines added / removed per file, tap a file name to view it, and Keep or Undo each file, just like Keep / Undo on the desktop.
+- **Changed files**: after the Agent edits files, "N files changed ›" appears above the input box. Tap it to see lines added / removed per file, tap a file name to view it, and Keep or Undo each file, just like Keep / Undo on the desktop.
 - **Send images**: the image button next to the input box attaches a photo or screenshot (say, a picture of an error on another screen) to Cursor's input box, so you can send it along with your message. Large images are compressed on the phone first.
 - **Confirmation for risky actions**: stopping the Agent or a sub-agent, undoing changes, deleting queued messages, rejecting, removing a device and unpairing all ask for confirmation first.
 - **Voice input (off by default)**: your keyboard's microphone already does dictation, so the microphone button is hidden by default. Turn it on under "⋯ → Voice button": the Android app uses the system speech recognizer; iPhone / browsers use the browser's built-in speech recognition.
@@ -122,7 +124,7 @@ npm run pair
 A QR code appears in the terminal (valid for 10 minutes, single use). Scan it with your phone's camera or browser to open it; there's no password to type.
 If you can't scan it, send the link shown below the QR code to your phone and open it (or paste it into the app's input box).
 
-<p align="center"><img src="docs/ui-pair.png" width="220" alt="Screen shown before pairing"></p>
+<p align="center"><img src="docs/en/ui-pair.png" width="220" alt="Screen shown before pairing"></p>
 
 **Step 3: Install it on your phone (optional, but recommended)**
 
