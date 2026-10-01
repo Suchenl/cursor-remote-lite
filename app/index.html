@@ -100,7 +100,32 @@
   .opt.cur { border-color: #1177bb; }
   .opt.cur::after { content: "✓"; color: #4af; flex: none; }
   .hint { font-size: 13px; color: #999; margin: 4px 4px 10px; line-height: 1.6; }
-  #sheet img { display: block; width: min(280px, 80vw); margin: 6px auto 10px; border-radius: 10px; }
+  .qrs { display: flex; gap: 10px; margin: 4px 0 10px; }
+  .qrs figure { flex: 1; min-width: 0; margin: 0; text-align: center; font-size: 13px; color: #aaa; }
+  .qrs img { display: block; width: 100%; border-radius: 10px; margin-bottom: 4px; }
+  a.opt { color: #e6e6e6; text-decoration: none; background: #2d2d2d; border: 1px solid #3c3c3c; border-radius: 8px; box-sizing: border-box; }
+
+  /* file links + viewer */
+  .assistant code[data-file], .tool[data-file] { cursor: pointer; }
+  .assistant code[data-file] { color: #6cb6ff; text-decoration: underline; text-decoration-color: #6cb6ff66; text-underline-offset: 2px; }
+  .tool[data-file] .txt::before { content: "📄 "; }
+  #viewer { position: fixed; inset: 0; z-index: 25; background: #1e1e1e; display: none; flex-direction: column;
+            padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  #viewer.open { display: flex; }
+  #viewer .bar { flex: none; display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: #252526; border-bottom: 1px solid #333; min-width: 0; }
+  #viewer .names { flex: 1; min-width: 0; line-height: 1.25; }
+  #vName { font-size: 14px; color: #eee; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #vPath { font-size: 11px; color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+  #vBody { flex: 1; min-height: 0; overflow: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+  #vBody .code { font: 12px/1.5 ui-monospace, Menlo, monospace; padding: 6px 0 40px; min-width: max-content; }
+  #vBody.wrap .code { min-width: 0; }
+  #vBody .l { display: flex; white-space: pre; }
+  #vBody.wrap .l { white-space: pre-wrap; overflow-wrap: anywhere; }
+  #vBody .l i { flex: none; width: 3.6em; padding-right: 10px; text-align: right; color: #5a5a5a; font-style: normal; user-select: none; -webkit-user-select: none; }
+  #vBody .l.hl { background: #264f7855; }
+  #vBody img { display: block; max-width: 100%; margin: 12px auto; background: #fff1; }
+  #vBody .note { padding: 30px 20px; color: #999; text-align: center; line-height: 1.7; }
+  #vBody .note.err { color: #f77; }
 
   /* gate (login / offline) */
   #gate { position: fixed; inset: 0; z-index: 20; background: #1e1e1e; display: none; flex-direction: column; gap: 12px; padding: calc(60px + env(safe-area-inset-top)) 24px 24px; }
@@ -175,6 +200,15 @@
 
 <div id="shade"></div>
 <div id="sheet"></div>
+
+<div id="viewer">
+  <div class="bar">
+    <button id="vClose">←</button>
+    <div class="names"><div id="vName"></div><div id="vPath"></div></div>
+    <button id="vWrap">换行</button>
+  </div>
+  <div id="vBody"></div>
+</div>
 
 <div id="gate">
   <h2>Cursor Remote</h2>
@@ -371,6 +405,7 @@ function connect() {
       send({ t: 'windows' });
     }
     else if (m.t === 'menu') showMenu(m.kind, m.items);
+    else if (m.t === 'file') showFile(m);
     else if (m.t === 'status') status(m.msg, m.ok);
   };
 }
@@ -413,14 +448,23 @@ let installEvent = null;
 window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvent = e; });
 const standalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone;
 
-let donateAvailable = false;
-fetch('donate-wechat.png', { method: 'HEAD' }).then(r => { donateAvailable = r.ok; }).catch(() => {});
+let donate = null;
+fetch('donate.json').then(r => r.ok ? r.json() : null).then(d => { if (d?.qr?.length || d?.links?.length) donate = d; }).catch(() => {});
+
+function showDonate() {
+  const links = (donate.links || []).filter(l => /^https:\/\//.test(l.url));
+  openSheet('donate', `<h3>赞赏作者 ☕</h3>
+    <div class="hint">觉得好用的话，可以请作者喝杯咖啡。完全自愿，感谢支持！</div>
+    <div class="qrs">${(donate.qr || []).map(q => `<figure><img src="${esc(q.image)}" alt="${esc(q.label)}"><figcaption>${esc(q.label)}</figcaption></figure>`).join('')}</div>
+    ${links.map(l => `<a class="opt" href="${esc(l.url)}" target="_blank" rel="noopener"><span class="lbl">${esc(l.label)}</span><span class="tag">海外</span></a>`).join('')}
+    <div class="hint">手机上可以长按二维码保存，再用微信 / 支付宝「扫一扫」从相册识别。</div>`);
+}
 
 function showMainMenu() {
   openSheet('main', `<h3>菜单</h3>
     ${standalone() ? '' : '<button class="opt" data-act="install"><span class="lbl">安装到手机桌面（像 App 一样打开）</span></button>'}
     <button class="opt" data-act="reconnect"><span class="lbl">重新连接</span></button>
-    ${donateAvailable ? '<button class="opt" data-act="donate"><span class="lbl">赞赏作者 ☕</span></button>' : ''}
+    ${donate ? '<button class="opt" data-act="donate"><span class="lbl">赞赏作者 ☕</span></button>' : ''}
     <button class="opt" data-act="logout"><span class="lbl">退出登录</span></button>`);
 }
 $('menuBtn').onclick = showMainMenu;
@@ -444,9 +488,7 @@ $('sheet').addEventListener('click', async e => {
     else showInstallHelp();
   }
   else if (act === 'reconnect') { closeSheet(); ws?.close(); }
-  else if (act === 'donate') {
-    openSheet('donate', `<h3>赞赏作者</h3><div class="hint">觉得好用的话，可以请作者喝杯咖啡（微信扫码）。完全自愿，感谢支持！</div><img src="donate-wechat.png" alt="微信赞赏码">`);
-  }
+  else if (act === 'donate') showDonate();
   else if (act === 'logout') {
     closeSheet();
     await api('/api/logout', { method: 'POST' }).catch(() => {});
@@ -485,7 +527,10 @@ function renderItem(it) {
   if (it.k === 'human') el.innerHTML = `<div class="bubble">${esc(it.t || '')}</div>`;
   // it.h comes from the whitelist sanitizer in server.mjs (pageHelpers.clean): plain tags only, text escaped.
   else if (it.k === 'assistant') el.innerHTML = it.h || '';
-  else if (it.k === 'tool') el.innerHTML = `<div class="txt">${esc(it.t || '')}</div>`;
+  else if (it.k === 'tool') {
+    el.innerHTML = `<div class="txt">${esc(it.t || '')}</div>`;
+    if (it.f) el.dataset.file = it.f;
+  }
   else el.textContent = it.t || '';
   if (it.b && it.k !== 'human') el.insertAdjacentHTML('beforeend', `<div class="btns">${buttonsHtml(it.b, it.i)}</div>`);
   return el;
@@ -542,6 +587,8 @@ $('older').onclick = () => send({ t: 'scrollChat', dy: -900 });
 
 document.addEventListener('click', e => {
   const b = e.target.closest('button[data-item]');
+  const f = !b && e.target.closest('#items [data-file]');
+  if (f) return openFile(f.dataset.file);
   if (!b) return;
   send({ t: 'click', item: b.dataset.item, n: Number(b.dataset.n) });
   status('已点击：' + b.textContent);
@@ -551,6 +598,61 @@ $('pickMode').onclick = () => { status('读取模式列表…'); send({ t: 'open
 $('pickModel').onclick = () => { status('读取模型列表…'); send({ t: 'openMenu', kind: 'model' }); };
 $('pickHistory').onclick = () => { status('读取历史对话…'); send({ t: 'openMenu', kind: 'history' }); };
 $('newChat').onclick = () => { send({ t: 'newChat' }); status('已新建对话'); };
+
+/* ---------- file viewer ---------- */
+$('vBody').classList.toggle('wrap', store.get('wrap') !== 'off');
+$('vWrap').classList.toggle('on', store.get('wrap') !== 'off');
+
+function openFile(ref) {
+  $('vName').textContent = ref.split('/').pop();
+  $('vPath').textContent = '';
+  $('vBody').innerHTML = '<div class="note">正在从电脑读取…</div>';
+  if (!$('viewer').classList.contains('open')) {
+    $('viewer').classList.add('open');
+    history.pushState({ viewer: true }, '');
+  }
+  send({ t: 'file', path: ref });
+}
+
+function showFile(m) {
+  if (!$('viewer').classList.contains('open') || m.loading) return;
+  $('vName').textContent = m.name || '';
+  // Leading LRM keeps the rtl ellipsis from reordering the path's slashes.
+  $('vPath').textContent = m.path ? '\u200e' + (m.host ? m.host + ':' : '') + m.path + (m.size != null ? ` · ${fmtSize(m.size)}` : '') : '';
+  const body = $('vBody');
+  if (m.error) {
+    body.innerHTML = `<div class="note err">${esc(m.error)}</div><div class="note">可以切到「画面」在 Cursor 里打开</div>`;
+    return;
+  }
+  if (m.image) {
+    body.innerHTML = '';
+    const img = new Image();
+    img.src = m.image;
+    body.append(img);
+    return;
+  }
+  const lines = m.text.replace(/\n$/, '').split('\n');
+  body.innerHTML = `<div class="code">${lines.map((l, n) =>
+    `<div class="l${n + 1 === m.line ? ' hl' : ''}"><i>${n + 1}</i>${esc(l) || ' '}</div>`).join('')}</div>`
+    + (m.truncated ? '<div class="note">文件太长，只显示了前 512 KB</div>' : '');
+  body.scrollTop = 0;
+  if (m.line) body.querySelector('.hl')?.scrollIntoView({ block: 'center' });
+}
+
+const fmtSize = n => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(1) + ' MB';
+
+function closeViewer() {
+  $('viewer').classList.remove('open');
+  $('vBody').innerHTML = '';
+}
+$('vClose').onclick = () => history.state?.viewer ? history.back() : closeViewer();
+window.addEventListener('popstate', () => { if ($('viewer').classList.contains('open')) closeViewer(); });
+$('vWrap').onclick = () => {
+  const on = !$('vBody').classList.contains('wrap');
+  $('vBody').classList.toggle('wrap', on);
+  $('vWrap').classList.toggle('on', on);
+  store.set('wrap', on ? null : 'off');
+};
 
 /* ---------- screen view ---------- */
 const view = $('view'), stage = $('stage'), screen = $('screen');

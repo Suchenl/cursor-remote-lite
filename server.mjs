@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { WebSocketServer } from 'ws';
 import qrcode from 'qrcode-terminal';
+import { workspaces, workspaceForTitle, fileSize, readFile, parseRef } from './files.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 3939);
@@ -238,6 +239,13 @@ function pageHelpers() {
   const BLOCK = new Set(['P', 'UL', 'OL', 'LI', 'H1', 'H2', 'H3', 'H4', 'H5', 'BLOCKQUOTE', 'TABLE', 'THEAD', 'TBODY', 'TR', 'TD', 'TH', 'DIV']);
   const INLINE = new Set(['STRONG', 'B', 'EM', 'I', 'CODE', 'DEL']);
   const CODE_BLOCK = '.composer-code-block-container, .composer-message-codeblock, .ui-code-block, pre';
+  const FILE_REF = 'code.md-inline-path-filename-like';
+
+  // Edit/read tool cards keep the absolute path in the header's title; fall back to the shown file name.
+  const toolFile = el => {
+    const titled = [...el.querySelectorAll('[title]')].map(e => e.getAttribute('title')).find(t => /^(\/|~\/|[A-Za-z]:\\)\S+$/.test(t));
+    return titled || el.querySelector('.ui-edit-tool-call__filename')?.innerText.trim() || null;
+  };
 
   const findPanel = () => {
     for (const ed of [...document.querySelectorAll('.aislash-editor-input, .ui-prompt-input-editor__input')].filter(vis)) {
@@ -269,6 +277,7 @@ function pageHelpers() {
       if (['STYLE', 'SCRIPT', 'BUTTON', 'svg', 'SVG', 'IMG'].includes(tag)) continue;
       if (tag === 'BR') { out += '<br>'; continue; }
       if (tag === 'HR') { out += '<hr>'; continue; }
+      if (n.matches(FILE_REF)) { out += `<code data-file="${esc(n.innerText.trim())}">${esc(n.innerText.trim())}</code>`; continue; }
       const inner = clean(n);
       const t = tag.toLowerCase();
       out += BLOCK.has(tag) || INLINE.has(tag) ? `<${t}>${inner}</${t}>` : inner;
@@ -294,6 +303,7 @@ function pageHelpers() {
       if (k === 'human') item.t = (el.querySelector('.aislash-editor-input-readonly, .composer-human-message') || el).innerText.trim();
       else if (k === 'assistant') { const md = el.querySelector('.markdown-root'); item.h = md ? clean(md) : esc(el.innerText); }
       else item.t = summary(el);
+      if (k === 'tool') { const f = toolFile(el); if (f) item.f = f; }
       const b = buttonsIn(el, false);
       if (b.length) item.b = b.map(x => x.label);
       return item;
@@ -369,7 +379,16 @@ function pageHelpers() {
     return [r.x, r.y, r.width, r.height].map(Math.round);
   };
 
-  return { extract, locate, panelRect, control, menuItems, menuItem };
+  const quickOpenRows = () => {
+    const w = document.querySelector('.quick-input-widget');
+    if (!w || !vis(w)) return null;
+    return [...w.querySelectorAll('.monaco-list-row')].filter(vis).map(e => ({
+      name: e.querySelector('.label-name')?.innerText.trim() || '',
+      dir: e.querySelector('.label-description')?.innerText.trim() || '',
+    }));
+  };
+
+  return { extract, locate, panelRect, control, menuItems, menuItem, quickOpenRows };
 }
 
 const helpersCall = call => `(${pageHelpers.toString()})().${call}`;
@@ -496,6 +515,83 @@ class Session {
     if (this.client.readyState === 1) this.client.send(JSON.stringify(obj));
   }
 
+  // Asks Cursor's own Cmd+P index where a bare file name lives, then closes the picker again.
+  async quickOpen(name) {
+    await this.key(process.platform === 'darwin' ? 'Meta+p' : 'Ctrl+p');
+    try {
+      let rows = null;
+      for (let i = 0; i < 6 && !rows; i++) {
+        await new Promise(r => setTimeout(r, 150));
+        rows = await this.cdp.evaluate(helpersCall('quickOpenRows()'));
+      }
+      if (!rows) return [];
+      await this.cdp.send('Input.insertText', { text: name });
+      let hits = [];
+      for (let i = 0; i < 12; i++) {
+        await new Promise(r => setTimeout(r, 250));
+        hits = (await this.cdp.evaluate(helpersCall('quickOpenRows()')) || []).filter(r => r.name === name);
+        if (hits.length) break;
+      }
+      return hits;
+    } finally {
+      await this.key('Escape');
+    }
+  }
+
+  async resolveFile(text) {
+    const { p, line } = parseRef(text);
+    if (!p) throw new Error('不是文件路径');
+    const ws = workspaceForTitle(this.winTitle || '');
+    const host = ws ? ws.host : /\[SSH: ([^\]]+)\]/.exec(this.winTitle || '')?.[1] || null;
+    const isAbs = /^(\/|~\/)/.test(p);
+    const tried = [];
+    const tryPath = async (h, abs) => {
+      if (tried.some(t => t.h === h && t.abs === abs)) return null;
+      tried.push({ h, abs });
+      const size = await fileSize(h, abs);
+      return size == null ? null : { host: h, path: abs, size, line };
+    };
+    if (isAbs) {
+      const hit = await tryPath(host, p);
+      if (hit) return hit;
+    } else if (ws) {
+      const hit = await tryPath(ws.host, path.posix.join(ws.root, p));
+      if (hit) return hit;
+    }
+    if (this.winTitle === 'Cursor Agents') {
+      // The Agents window mixes projects, so try recently opened folders.
+      for (const w of workspaces().slice(0, 8)) {
+        const hit = await tryPath(w.host, isAbs ? p : path.posix.join(w.root, p));
+        if (hit) return hit;
+      }
+      throw new Error(`找不到文件（可能已被删除或移动）：${p}`);
+    }
+    const name = path.posix.basename(p);
+    const dir = path.posix.dirname(p);
+    const hits = await this.quickOpen(name);
+    // Prefer matches inside this workspace (relative dir) whose folder ends with the path the chat showed.
+    const ranked = hits
+      .map(h => ({ ...h, abs: h.dir.startsWith('/') ? path.posix.join(h.dir, name) : ws ? path.posix.join(ws.root, h.dir, name) : null }))
+      .filter(h => h.abs)
+      .sort((a, b) => (dir !== '.' && b.abs.endsWith('/' + p)) - (dir !== '.' && a.abs.endsWith('/' + p)) || a.dir.startsWith('/') - b.dir.startsWith('/'));
+    for (const h of ranked) {
+      const hit = await tryPath(host, h.abs);
+      if (hit) return hit;
+    }
+    throw new Error(`找不到文件（可能已被删除或移动）：${p}`);
+  }
+
+  async openFile(text) {
+    this.emit({ t: 'file', loading: true, name: path.posix.basename(parseRef(text).p) });
+    try {
+      const f = await this.resolveFile(text);
+      const body = await readFile(f.host, f.path, f.size);
+      this.emit({ t: 'file', name: path.posix.basename(f.path), path: f.path, host: f.host, size: f.size, line: f.line, ...body });
+    } catch (e) {
+      this.emit({ t: 'file', error: e.message, name: path.posix.basename(parseRef(text).p) });
+    }
+  }
+
   async attach(targetId) {
     this.detach();
     const wins = await listWindows();
@@ -505,6 +601,7 @@ class Session {
     await cdp.connect();
     this.cdp = cdp;
     this.targetId = win.id;
+    this.winTitle = win.title;
     cdp.onclose = () => {
       if (this.cdp === cdp) {
         this.cdp = null;
@@ -638,6 +735,7 @@ class Session {
       case 'pickMenu': return this.pickMenu(msg.kind, msg.label);
       case 'newChat': return this.pressControl('newChat');
       case 'agentsWindow': return this.openAgentsWindow();
+      case 'file': return this.openFile(String(msg.path ?? ''));
       case 'click': return this.clickButton(msg.item, msg.n);
       case 'scrollChat': return this.scrollChat(Number(msg.dy) || 0);
       case 'tap': return this.tap(msg.x, msg.y, msg.button);
@@ -675,6 +773,7 @@ const MIME = {
   '.js': 'text/javascript; charset=utf-8',
   '.webmanifest': 'application/manifest+json',
   '.png': 'image/png',
+  '.jpg': 'image/jpeg',
   '.svg': 'image/svg+xml',
   '.json': 'application/json',
 };

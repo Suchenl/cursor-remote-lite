@@ -1,0 +1,7 @@
+{
+  "qr": [
+    { "label": "微信", "image": "donate-wechat.jpg" },
+    { "label": "支付宝", "image": "donate-alipay.jpg" }
+  ],
+  "links": []
+}
