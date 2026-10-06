@@ -16,6 +16,15 @@ const ask = async (q, def = '') => (await rl.question(def ? `${q} [${def}] ` : `
 const yes = async (q, def = 'y') => /^y/i.test(await ask(`${q} (y/n)`, def));
 const has = cmd => spawnSync('sh', ['-c', `command -v ${cmd}`]).status === 0;
 const run = (cmd, args, opts = {}) => spawnSync(cmd, args, { encoding: 'utf8', ...opts });
+// readline keeps the TTY in raw mode even when paused; child prompts need cooked mode to see Enter.
+const interactive = (cmd, args) => {
+  rl.pause();
+  if (process.stdin.isTTY) process.stdin.setRawMode(false);
+  const r = run(cmd, args, { stdio: 'inherit' });
+  if (process.stdin.isTTY) process.stdin.setRawMode(true);
+  rl.resume();
+  return r;
+};
 
 fs.mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
 const config = (() => { try { return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')); } catch { return {}; } })();
@@ -37,9 +46,7 @@ console.log('  仓库里只有 App 页面和加密过的电脑地址；解密钥
 if (has('gh') && await yes('  要设置吗？')) {
   if (run('gh', ['auth', 'status']).status !== 0) {
     console.log('  先登录 GitHub：');
-    rl.pause();
-    run('gh', ['auth', 'login'], { stdio: 'inherit' });
-    rl.resume();
+    if (interactive('gh', ['auth', 'login']).status !== 0) { console.log('  GitHub 登录没有完成，可以单独运行 gh auth login 后再运行 npm run setup'); process.exit(1); }
   }
   const login = run('gh', ['api', 'user', '--jq', '.login']).stdout.trim();
   const name = await ask('  仓库名', config.publishRepo?.split('/')[1] || 'cursor-remote-app');
@@ -70,9 +77,7 @@ if (isMac && await yes('  设为开机自启（后台常驻，崩溃自动重启
 console.log('\n4/4 安全');
 console.log('  手机通过「配对」登录，不用密码：每台手机在电脑上扫一次码即可。');
 if (await yes('  要再加一层 Authenticator 二次验证吗（Google / Microsoft Authenticator）？', 'n')) {
-  rl.pause();
-  run('node', [path.join(DIR, 'twofa.mjs')], { stdio: 'inherit' });
-  rl.resume();
+  interactive('node', [path.join(DIR, 'twofa.mjs')]);
 }
 
 console.log(`
