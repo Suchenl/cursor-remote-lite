@@ -77,7 +77,7 @@
 **本项目的不足**，也写在这里：
 
 - 靠读取 Cursor 的界面实现，Cursor 大改版后可能需要跟着更新。
-- 后台服务和启动脚本目前只支持 macOS；Windows 需要手动启动（见下文）。
+- 后台服务目前只支持 macOS；Windows 上用 `start-cursor.ps1` 启动 Cursor，服务需要手动开着（见下文）。
 - 免费的 Cloudflare 快速隧道没有可用性保证，偶尔会断开重连。
 
 ## 功能
@@ -110,7 +110,7 @@ Cursor 基于 Electron，用 `--remote-debugging-port` 启动后，中继通过 
 
 ## 要求
 
-- macOS（Windows / Linux 上 `server.mjs` 也能跑，但启动和后台服务脚本只支持 macOS，见下文「Windows」）
+- macOS（Windows / Linux 上 `server.mjs` 也能跑，但后台服务脚本只支持 macOS，Windows 用法见下文「Windows」）
 - Node.js 22+
 - [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)：外网访问，`brew install cloudflared`
 - [GitHub CLI](https://cli.github.com/)：固定地址，`brew install gh`
@@ -222,7 +222,10 @@ powercfg /setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 0
 powercfg /setactive SCHEME_CURRENT
 ```
 
-Windows 上的启动方式：用 `"%LOCALAPPDATA%\Programs\cursor\Cursor.exe" --remote-debugging-port=9222` 启动 Cursor，再在项目目录运行 `npm run public`（窗口不要关）。`npm run pair` 照常使用。
+Windows 上的启动方式（都在 PowerShell 里运行，不要用 Cursor 自带的终端，Cursor 重启时它会被一起关掉）：
+
+1. 在项目目录运行 `powershell -ExecutionPolicy Bypass -File .\start-cursor.ps1`，Cursor 会退出并带调试端口重新打开（等同于 Mac 上的 `./start-cursor.sh`）。
+2. 再运行 `npm run public`，这个窗口一直开着别关。`npm run pair` 照常使用。
 
 ### 代价
 
@@ -260,7 +263,7 @@ Windows 上的启动方式：用 `"%LOCALAPPDATA%\Programs\cursor\Cursor.exe" --
 
 ## 常见问题
 
-**手机上显示「未连接到 Cursor」**：Cursor 没带调试端口启动，运行 `./start-cursor.sh`。
+**手机上显示「未连接到 Cursor」**：Cursor 没带调试端口启动，运行 `./start-cursor.sh`（Windows 用 `start-cursor.ps1`）。
 
 **手机上显示「电脑不在线」**：电脑睡眠 / 关机，或服务刚重启（新地址约 1 分钟后生效，会自动重试）。见上文「防睡眠」。
 

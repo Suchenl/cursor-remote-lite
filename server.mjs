@@ -88,7 +88,7 @@ function originAllowed(req) {
 
 async function listWindows() {
   const res = await fetch(`${CDP_URL}/json/list`).catch(() => {
-    throw new Error('连不上 Cursor：Cursor 没有用 start-cursor.sh 启动（调试端口未开启）');
+    throw new Error('连不上 Cursor：Cursor 没有用 start-cursor.sh / start-cursor.ps1 启动（调试端口未开启）');
   });
   const targets = await res.json();
   return targets
@@ -1447,7 +1447,7 @@ server.listen(PORT, TUNNEL ? '127.0.0.1' : HOST, async () => {
     const wins = await listWindows();
     console.log(`已连上 Cursor，${wins.length} 个窗口：${wins.map(w => w.title).join(' | ')}`);
   } catch {
-    console.log(`!! 连不上 ${CDP_URL}。请用 ./start-cursor.sh 重新启动 Cursor（带 --remote-debugging-port=9222）`);
+    console.log(`!! 连不上 ${CDP_URL}。请用 ./start-cursor.sh（Windows: start-cursor.ps1）重新启动 Cursor（带 --remote-debugging-port=9222）`);
   }
   if (TUNNEL) {
     console.log('正在建立 Cloudflare 公网隧道…');

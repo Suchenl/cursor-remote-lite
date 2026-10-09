@@ -77,7 +77,7 @@ So this project provides both: an Android app that installs without Google servi
 **This project's limitations**, stated up front:
 
 - It works by reading Cursor's UI, so a major Cursor redesign may require an update.
-- The background service and startup scripts currently support macOS only; on Windows you have to start things manually (see below).
+- The background service currently supports macOS only; on Windows, start Cursor with `start-cursor.ps1` and keep the relay running by hand (see below).
 - Cloudflare's free quick tunnels come with no availability guarantee and occasionally disconnect and reconnect.
 
 ## Features
@@ -112,7 +112,7 @@ Cursor is built on Electron. When started with `--remote-debugging-port`, the re
 
 ## Requirements
 
-- macOS (`server.mjs` also runs on Windows / Linux, but the startup and background service scripts only support macOS; see "Windows" below)
+- macOS (`server.mjs` also runs on Windows / Linux, but the background service script only supports macOS; see "Windows" below for Windows usage)
 - Node.js 22+
 - [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/): for access from outside your network, `brew install cloudflared`
 - [GitHub CLI](https://cli.github.com/): for the fixed address, `brew install gh`
@@ -224,7 +224,10 @@ powercfg /setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 0
 powercfg /setactive SCHEME_CURRENT
 ```
 
-How to start on Windows: launch Cursor with `"%LOCALAPPDATA%\Programs\cursor\Cursor.exe" --remote-debugging-port=9222`, then run `npm run public` in the project directory (keep that window open). `npm run pair` works as usual.
+How to start on Windows (run these in PowerShell, not Cursor's built-in terminal, which closes when Cursor restarts):
+
+1. In the project directory, run `powershell -ExecutionPolicy Bypass -File .\start-cursor.ps1`. Cursor quits and reopens with the debugging port (the equivalent of `./start-cursor.sh` on Mac).
+2. Then run `npm run public` and keep that window open. `npm run pair` works as usual.
 
 ### Trade-offs
 
@@ -262,7 +265,7 @@ How to start on Windows: launch Cursor with `"%LOCALAPPDATA%\Programs\cursor\Cur
 
 ## FAQ
 
-**The phone shows "Not connected to Cursor"**: Cursor wasn't started with the debugging port; run `./start-cursor.sh`.
+**The phone shows "Not connected to Cursor"**: Cursor wasn't started with the debugging port; run `./start-cursor.sh` (on Windows, `start-cursor.ps1`).
 
 **The phone shows "Computer offline"**: the computer is asleep / shut down, or the service just restarted (the new address takes effect in about a minute, and the app retries automatically). See "Preventing sleep" above.
 

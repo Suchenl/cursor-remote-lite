@@ -481,11 +481,14 @@ async function boot() {
     return;
   }
   gate({ msg: '正在查找电脑…' });
+  let res;
   try {
-    info = await fetch('url.json?t=' + Date.now(), { cache: 'no-store' }).then(r => r.json());
+    res = await fetch('url.json?t=' + Date.now(), { cache: 'no-store' });
   } catch {
-    return gate({ msg: '读取失败，请检查手机网络', err: true, retry: true });
+    return gate({ msg: '读取失败，请检查手机网络（需要能打开 github.io）', err: true, retry: true });
   }
+  info = res.ok ? await res.json().catch(() => null) : null;
+  if (!info) return gate({ msg: '还没有找到电脑地址。\n请在电脑上运行 npm run public 并保持窗口开着，约 1 分钟后点重试。', err: true, retry: true });
   if (pending) store.set('key', pending.key);
   try {
     base = await resolveBase();

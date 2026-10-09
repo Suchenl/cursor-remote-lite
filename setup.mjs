@@ -82,6 +82,6 @@ if (await yes('  要再加一层 Authenticator 二次验证吗（Google / Micros
 
 console.log(`
 完成！还差两步：
-  1. 用 ./start-cursor.sh 重启 Cursor（带调试端口），手机才能控制它。
+  1. 用 ${isMac ? './start-cursor.sh' : 'powershell -ExecutionPolicy Bypass -File .\\start-cursor.ps1'} 重启 Cursor（带调试端口），手机才能控制它。
   2. 运行 npm run pair，用手机扫码配对。以后每台新手机都这样配对一次。`);
 rl.close();
