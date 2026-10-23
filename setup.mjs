@@ -58,10 +58,22 @@ if (has('gh') && await yes('  要设置吗？')) {
   // Pages needs at least one commit before it can be enabled; the server uploads the rest on start.
   const index = fs.readFileSync(path.join(DIR, 'app', 'index.html'));
   const sha = run('gh', ['api', `repos/${repo}/contents/index.html`, '--jq', '.sha']).stdout.trim();
-  run('gh', ['api', '-X', 'PUT', `repos/${repo}/contents/index.html`, '--input', '-'], {
+  const uploaded = run('gh', ['api', '-X', 'PUT', `repos/${repo}/contents/index.html`, '--input', '-'], {
     input: JSON.stringify({ message: 'add app', content: index.toString('base64'), ...(sha ? { sha } : {}) }),
   });
-  run('gh', ['api', '-X', 'POST', `repos/${repo}/pages`, '-f', 'source[branch]=main', '-f', 'source[path]=/']);
+  if (uploaded.status !== 0) { console.log(uploaded.stderr); process.exit(1); }
+  // gh repo create uses the account's default branch, which is master on many accounts.
+  // Asking Pages for a branch that does not exist fails, and ignoring that failure leaves
+  // https://<user>.github.io/<repo>/ as "There isn't a GitHub Pages site here."
+  const branch = run('gh', ['api', `repos/${repo}`, '--jq', '.default_branch']).stdout.trim();
+  const pages = run('gh', ['api', '-X', 'POST', `repos/${repo}/pages`, '--input', '-'], {
+    input: JSON.stringify({ source: { branch, path: '/' } }),
+  });
+  if (pages.status !== 0 && !/409|already enabled/i.test(`${pages.stderr}\n${pages.stdout}`)) {
+    console.log(`  开启 GitHub Pages 失败（发布分支 ${branch || '未知'}）：`);
+    console.log((pages.stderr || pages.stdout).trim());
+    process.exit(1);
+  }
   config.publishRepo = repo;
   saveConfig();
   console.log(`  手机 App 地址：https://${login.toLowerCase()}.github.io/${name}/`);
