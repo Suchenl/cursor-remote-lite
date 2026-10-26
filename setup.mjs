@@ -65,14 +65,29 @@ if (has('gh') && await yes('  要设置吗？')) {
   // gh repo create uses the account's default branch, which is master on many accounts.
   // Asking Pages for a branch that does not exist fails, and ignoring that failure leaves
   // https://<user>.github.io/<repo>/ as "There isn't a GitHub Pages site here."
-  const branch = run('gh', ['api', `repos/${repo}`, '--jq', '.default_branch']).stdout.trim();
+  const branchResult = run('gh', ['api', `repos/${repo}`, '--jq', '.default_branch']);
+  const branch = branchResult.stdout.trim();
+  if (branchResult.status !== 0 || !branch) {
+    console.log('  读取 GitHub 仓库默认分支失败：');
+    console.log((branchResult.stderr || branchResult.stdout || 'API 未返回默认分支').trim());
+    process.exit(1);
+  }
   const pages = run('gh', ['api', '-X', 'POST', `repos/${repo}/pages`, '--input', '-'], {
     input: JSON.stringify({ source: { branch, path: '/' } }),
   });
-  if (pages.status !== 0 && !/409|already enabled/i.test(`${pages.stderr}\n${pages.stdout}`)) {
-    console.log(`  开启 GitHub Pages 失败（发布分支 ${branch || '未知'}）：`);
-    console.log((pages.stderr || pages.stdout).trim());
-    process.exit(1);
+  if (pages.status !== 0) {
+    // Only ignore a failed create if Pages is already using the requested source.
+    const existing = run('gh', ['api', `repos/${repo}/pages`, '--jq', '.source']);
+    let source = null;
+    if (existing.status === 0) {
+      try { source = JSON.parse(existing.stdout); } catch {}
+    }
+    if (source?.branch !== branch || source?.path !== '/') {
+      console.log(`  开启 GitHub Pages 失败（发布分支 ${branch}）：`);
+      console.log((pages.stderr || pages.stdout || 'GitHub Pages 未开启').trim());
+      if (existing.status === 0) console.log('  已有 Pages 配置与预期的分支或路径不一致。');
+      process.exit(1);
+    }
   }
   config.publishRepo = repo;
   saveConfig();
